@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+python-multipart
+# 未來會用到
+# torch
+# transformers
+# opencv-python
+# mediapipe
