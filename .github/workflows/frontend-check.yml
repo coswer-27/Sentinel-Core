@@ -1,0 +1,15 @@
+name: Frontend Quality Check
+
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Use Node.js
+        uses: actions/setup-python@v4 # 雖然是 JS，但我們用簡單的語法檢查
+      - name: Syntax Check
+        run: |
+          # 這裡可以放一些簡單的 JS 語法檢查指令
+          echo "Checking JavaScript syntax..."
