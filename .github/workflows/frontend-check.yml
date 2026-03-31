@@ -8,8 +8,12 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Use Node.js
-        uses: actions/setup-python@v4 # 雖然是 JS，但我們用簡單的語法檢查
-      - name: Syntax Check
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: JavaScript Syntax Check
         run: |
-          # 這裡可以放一些簡單的 JS 語法檢查指令
           echo "Checking JavaScript syntax..."
+          for f in browser-ext/*.js; do
+            node --check "$f" && echo "✅ $f OK" || exit 1
+          done
