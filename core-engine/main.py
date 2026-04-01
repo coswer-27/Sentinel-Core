@@ -1,12 +1,21 @@
 import os
 from contextlib import asynccontextmanager
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from detectors import TextDetector
-from schemas import SecurityRequest, SecurityResponse
+load_dotenv()
+
+from detectors import TextDetector, URLDetector
+from schemas import (
+    BatchUrlRequest,
+    BatchUrlResponse,
+    SecurityRequest,
+    SecurityResponse,
+    UrlScanResult,
+)
 
 ALLOWED_ORIGINS = os.getenv(
     "ALLOWED_ORIGINS",
@@ -17,6 +26,7 @@ ALLOWED_ORIGINS = os.getenv(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.detector = TextDetector()
+    app.state.url_detector = URLDetector()
     yield
 
 
@@ -34,11 +44,36 @@ app.add_middleware(
 async def analyze(request: SecurityRequest, req: Request):
     print(f"🔮 AI 正在分析語意: {request.content}")
     result = req.app.state.detector.analyze(request.content)
+    label = result.get("label")
+    if label is None:
+        label = "Danger" if result.get("is_danger") else "Safe"
     return SecurityResponse(
         request_id=request.request_id,
-        label="Danger" if result["is_danger"] else "Safe",
+        label=label,
         trust_score=result["trust_score"],
-        reason=result["reason"]
+        reason=result["reason"],
+    )
+
+
+@app.post("/analyze/links", response_model=BatchUrlResponse)
+async def analyze_links(request: BatchUrlRequest, req: Request):
+    url_detector: URLDetector = req.app.state.url_detector
+    try:
+        rows = await url_detector.analyze_batch(request.urls)
+    except Exception as e:
+        rows = [
+            {
+                "final_url": u,
+                "trust_score": 50,
+                "label": "Suspicious",
+                "reason": f"無法分析此連結：{str(e)}",
+            }
+            for u in request.urls
+        ]
+    return BatchUrlResponse(
+        results=[
+            UrlScanResult(url=u, **r) for u, r in zip(request.urls, rows)
+        ]
     )
 
 

@@ -1,7 +1,9 @@
 from transformers import pipeline
 
+from .base import BaseDetector
 
-class TextDetector:
+
+class TextDetector(BaseDetector):
     def __init__(self):
         print("⏳ 正在載入 AI 模型，請稍候...")
         self._classifier = pipeline(
@@ -23,5 +25,6 @@ class TextDetector:
         return {
             "is_danger": is_danger,
             "trust_score": trust_score,
-            "reason": reason
+            "label": "Danger" if is_danger else "Safe",
+            "reason": reason,
         }

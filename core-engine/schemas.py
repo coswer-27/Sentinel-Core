@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 
 
 class SecurityRequest(BaseModel):
@@ -14,3 +14,19 @@ class SecurityResponse(BaseModel):
     trust_score: int
     label: str
     reason: str
+
+
+class UrlScanResult(BaseModel):
+    url: str
+    final_url: str
+    trust_score: int
+    label: str
+    reason: str
+
+
+class BatchUrlRequest(BaseModel):
+    urls: List[str]
+
+
+class BatchUrlResponse(BaseModel):
+    results: List[UrlScanResult]
