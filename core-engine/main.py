@@ -1,10 +1,18 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, Request
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 from transformers import pipeline  # 🚀 關鍵：導入 AI 套件
 import uvicorn
 
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # 保持 CORS 設定，讓前端能連線
 app.add_middleware(
@@ -24,14 +32,16 @@ classifier = pipeline(
 print("✅ AI 模型載入完成！")
 
 class SecurityRequest(BaseModel):
-    content: str
+    content: str = Field(..., max_length=5000)
+
 
 @app.post("/analyze")
-async def analyze(request: SecurityRequest):
-    print(f"🔮 AI 深度分析中: {request.content[:20]}...")
+@limiter.limit("30/minute")
+async def analyze(request: Request, body: SecurityRequest):
+    print(f"🔮 AI 深度分析中: {body.content[:20]}...")
     
     # 1. 取得 Top_k=5 的所有星等機率
-    raw_results = classifier(request.content, top_k=5)
+    raw_results = classifier(body.content, top_k=5)
     prob_dict = {res['label']: res['score'] for res in raw_results}
     
     # 2. 定義 0-100 的權重
