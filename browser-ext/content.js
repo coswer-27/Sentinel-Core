@@ -1,151 +1,125 @@
+/**
+ * Sentinel-Core v1.2 - 前端視覺引擎 (Visual Vibrant)
+ * 已整合：微服務 Gateway、三色主題、錯誤處理、流暢動畫
+ */
+
 // --- 1. 監聽選取事件 ---
-console.log("📍 開始掛載監聽器...");
-
-document.addEventListener('mouseup', function(event) {
-    // 加上這行測試，只要滑鼠放開，不管有沒有選到字都要有反應
-    console.log("🖱️ 偵測到滑鼠放開動作");
-
+document.addEventListener('mouseup', function() {
     let selection = window.getSelection();
     let selectedText = selection.toString().trim();
 
-    console.log("📝 選取的文字內容:", selectedText);
-
+    // 門檻設定：避免選到單個標點符號也發送請求
     if (selectedText.length >= 2) {
-        console.log("🚀 文字長度達標，準備發送給後端...");
         analyzeText(selectedText);
     }
 });
 
-// --- 2. 與後端通訊 ---
+// --- 2. 與後端 (Gateway) 通訊 ---
 async function analyzeText(text) {
     try {
         const response = await fetch('http://127.0.0.1:8000/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                request_id: "ui-test-" + Date.now(),
-                payload_type: "text",
-                content: text,
-                url: window.location.href
-            })
+            body: JSON.stringify({ content: text })
         });
 
         const data = await response.json();
 
-        // 如果後端判斷為危險，則顯示通知
-        if (data.label === "Danger") {
+        if (response.ok) {
+            // v1.2 改動：不論標籤為何，都呼叫 UI 顯示，展現三色動態
             showSafetyNotification(data.reason, data.trust_score, text);
+        } else if (response.status === 429) {
+            // 對接組員實作的 Rate Limiting
+            showSafetyNotification("請求過於頻繁，請稍後再試。", 50, "系統限流", "#faad14", "⏳");
+        } else {
+            // 處理 502, 503, 504 等伺服器異常
+            showSafetyNotification(`偵測服務異常 (${response.status})`, 0, "連線故障", "#8c8c8c", "🛠️");
         }
+
     } catch (error) {
         console.error("Sentinel-Core 連線失敗:", error);
+        showSafetyNotification("無法連線至網關，請確認後端是否啟動。", 0, "連線失敗", "#8c8c8c", "❌");
     }
 }
 
-// --- 3. UI 注入函式 ---
-function showSafetyNotification(reason, score, quotedText = "") {
-    // 【修復 UI-04】物理移除舊通知，確保新通知取代而非重疊
+// --- 3. UI 注入與動態主題 ---
+function showSafetyNotification(reason, score, quotedText = "", overrideColor = null, overrideIcon = null) {
+    // 移除舊通知
     const oldNotify = document.getElementById('sentinel-notify');
     if (oldNotify) oldNotify.remove();
 
+    // 計算數據
+    const s = Math.round(Number(score));
+    const risk = 100 - s;
+
+    // --- [v1.2 主題引擎] ---
+    let theme = { color: '#ff4d4f', icon: '🚨', title: '高風險內容', time: 8000 }; // 預設紅色 (Danger)
+    if (s > 70) {
+        theme = { color: '#52c41a', icon: '✅', title: '內容安全', time: 4000 }; // 綠色 (Safe)
+    } else if (s >= 40) {
+        theme = { color: '#faad14', icon: '⚠️', title: '疑似風險', time: 6000 }; // 橘色 (Warning)
+    }
+
+    const finalColor = overrideColor || theme.color;
+    const finalIcon = overrideIcon || theme.icon;
+
+    // 建立通知容器
     const notify = document.createElement('div');
     notify.id = 'sentinel-notify';
-
-    const scoreNum = Number(score);
-    const safeScore = Number.isFinite(scoreNum)
-        ? Math.max(0, Math.min(100, Math.round(scoreNum)))
-        : 0;
-    const themeColor = safeScore <= 30 ? '#ff4d4f' : '#faad14';
-    const qt = typeof quotedText === 'string' ? quotedText : '';
-    const shortText = qt.length > 25 ? qt.substring(0, 25) + '...' : qt;
-    const risk = 100 - safeScore;
-
     Object.assign(notify.style, {
         position: 'fixed', bottom: '30px', right: '30px', width: '320px',
-        backgroundColor: '#ffffff', color: '#333', borderLeft: `6px solid ${themeColor}`,
-        boxShadow: '0 10px 25px rgba(0,0,0,0.2)', padding: '20px', borderRadius: '8px',
-        zIndex: '1000000', fontFamily: "'Segoe UI', Roboto, sans-serif",
-        animation: 'sentinel-slide-in 0.4s ease-out'
+        backgroundColor: '#ffffff', borderLeft: `8px solid ${finalColor}`,
+        boxShadow: '0 12px 32px rgba(0,0,0,0.15)', padding: '20px', borderRadius: '12px',
+        zIndex: '2147483647', fontFamily: "system-ui, -apple-system, sans-serif",
+        animation: 'sentinel-slide-in 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28)'
     });
 
-    const headerRow = document.createElement('div');
-    Object.assign(headerRow.style, { display: 'flex', alignItems: 'center', marginBottom: '8px' });
-    const iconSpan = document.createElement('span');
-    iconSpan.style.fontSize = '20px';
-    iconSpan.style.marginRight = '10px';
-    iconSpan.textContent = '🚨';
-    const titleStrong = document.createElement('strong');
-    Object.assign(titleStrong.style, { fontSize: '15px', color: '#ff4d4f' });
-    titleStrong.textContent = '分析報告：高風險內容';
-    headerRow.appendChild(iconSpan);
-    headerRow.appendChild(titleStrong);
+    // 內容模板
+    notify.innerHTML = `
+        <div style="display:flex; align-items:center; margin-bottom:10px;">
+            <span style="font-size:22px; margin-right:10px;">${finalIcon}</span>
+            <strong style="font-size:16px; color:${finalColor};">${theme.title}</strong>
+        </div>
+        <div style="font-style:italic; color:#666; font-size:12px; background:#f8f9fa; padding:10px; border-radius:6px; margin-bottom:12px; border-left:3px solid #ddd;">
+            "${quotedText.length > 25 ? quotedText.substring(0, 25) + '...' : quotedText}"
+        </div>
+        <div style="font-size:14px; line-height:1.5; margin-bottom:15px;">${reason}</div>
+        <div style="background:#eee; height:8px; border-radius:4px; overflow:hidden;">
+            <div id="sentinel-bar" style="background:${finalColor}; width:0%; height:100%; transition:width 1.2s cubic-bezier(0.1, 0.7, 0.1, 1);"></div>
+        </div>
+        <div style="font-size:11px; color:#999; margin-top:8px; display:flex; justify-content:space-between;">
+            <span>安全度: ${s}%</span><span style="font-weight:bold; color:${finalColor}">風險: ${risk}%</span>
+        </div>
+    `;
 
-    const quoteBox = document.createElement('div');
-    Object.assign(quoteBox.style, {
-        fontStyle: 'italic', color: '#666', fontSize: '12px', background: '#f9f9f9',
-        padding: '8px', borderRadius: '4px', marginBottom: '10px', borderLeft: '3px solid #ddd'
-    });
-    quoteBox.textContent = shortText ? `"${shortText}"` : '""';
-
-    const reasonRow = document.createElement('div');
-    Object.assign(reasonRow.style, { fontSize: '14px', lineHeight: '1.4', marginBottom: '12px' });
-    const reasonLabel = document.createElement('strong');
-    reasonLabel.textContent = '原因：';
-    reasonRow.appendChild(reasonLabel);
-    reasonRow.appendChild(document.createTextNode(typeof reason === 'string' ? reason : ''));
-
-    const barOuter = document.createElement('div');
-    Object.assign(barOuter.style, {
-        background: '#eee', height: '10px', borderRadius: '5px',
-        overflow: 'hidden', position: 'relative'
-    });
-    const barInner = document.createElement('div');
-    Object.assign(barInner.style, {
-        background: '#ff4d4f', width: `${risk}%`, height: '100%', transition: 'width 0.8s ease'
-    });
-    barOuter.appendChild(barInner);
-
-    const footerRow = document.createElement('div');
-    Object.assign(footerRow.style, {
-        fontSize: '12px', color: '#666', marginTop: '6px',
-        display: 'flex', justifyContent: 'space-between'
-    });
-    const trustSpan = document.createElement('span');
-    trustSpan.textContent = `信任值: ${safeScore}%`;
-    const riskSpan = document.createElement('span');
-    Object.assign(riskSpan.style, { fontWeight: 'bold', color: '#ff4d4f' });
-    riskSpan.textContent = `風險佔比: ${risk}%`;
-    footerRow.appendChild(trustSpan);
-    footerRow.appendChild(riskSpan);
-
-    notify.appendChild(headerRow);
-    notify.appendChild(quoteBox);
-    notify.appendChild(reasonRow);
-    notify.appendChild(barOuter);
-    notify.appendChild(footerRow);
-
-    // 注入動畫 CSS（id 去重，避免重複注入）
+    // 注入動畫樣式
     if (!document.getElementById('sentinel-style')) {
-        const styleTag = document.createElement('style');
-        styleTag.id = 'sentinel-style';
-        styleTag.textContent = `
-            @keyframes sentinel-slide-in {
-                from { opacity: 0; transform: translateX(50px); }
-                to { opacity: 1; transform: translateX(0); }
+        const style = document.createElement('style');
+        style.id = 'sentinel-style';
+        style.innerHTML = `
+            @keyframes sentinel-slide-in { 
+                from { opacity:0; transform:translateX(50px); } 
+                to { opacity:1; transform:translateX(0); } 
             }
         `;
-        document.head.appendChild(styleTag);
+        document.head.appendChild(style);
     }
 
     document.body.appendChild(notify);
 
-    // 【修復 UI-04】確保 6 秒後移除的是「當前這一個」DOM 實例
+    // 啟動進度條動畫
+    setTimeout(() => {
+        const bar = document.getElementById('sentinel-bar');
+        if (bar) bar.style.width = `${risk}%`;
+    }, 100);
+
+    // 自動退場
     setTimeout(() => {
         if (document.body.contains(notify)) {
             notify.style.opacity = '0';
-            notify.style.transition = 'opacity 0.5s';
-            setTimeout(() => {
-                if (document.body.contains(notify)) notify.remove();
-            }, 500);
+            notify.style.transform = 'translateY(10px)';
+            notify.style.transition = 'all 0.5s ease';
+            setTimeout(() => notify.remove(), 500);
         }
-    }, 6000);
+    }, theme.time);
 }
