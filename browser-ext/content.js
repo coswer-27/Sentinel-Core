@@ -34,70 +34,108 @@ async function analyzeText(text) {
 
         // 如果後端判斷為危險，則顯示通知
         if (data.label === "Danger") {
-            showSafetyNotification(data.reason, data.trust_score);
+            showSafetyNotification(data.reason, data.trust_score, text);
         }
     } catch (error) {
         console.error("Sentinel-Core 連線失敗:", error);
     }
 }
 
-// --- 3. UI 注入函式 (Toast Notification) ---
-function showSafetyNotification(reason, score) {
-    // 檢查是否已經有通知存在，避免重複彈出
-    if (document.getElementById('sentinel-notify')) return;
+function showSafetyNotification(reason, score, quotedText = "") {
+    // 物理移除舊通知
+    const oldNotify = document.getElementById('sentinel-notify');
+    if (oldNotify) oldNotify.remove();
 
     const notify = document.createElement('div');
     notify.id = 'sentinel-notify';
-    
-    // 設定樣式 (使用 JS Inline Style 確保樣式隔離)
+
+    const scoreNum = Number(score);
+    const safeScore = Number.isFinite(scoreNum)
+        ? Math.max(0, Math.min(100, Math.round(scoreNum)))
+        : 0;
+    const themeColor = safeScore <= 30 ? '#ff4d4f' : '#faad14';
+    const qt = typeof quotedText === 'string' ? quotedText : '';
+    const shortText = qt.length > 25 ? qt.substring(0, 25) + '...' : qt;
+    const risk = 100 - safeScore;
+
     Object.assign(notify.style, {
-        position: 'fixed',
-        bottom: '30px',
-        right: '30px',
-        width: '320px',
-        backgroundColor: '#ffffff',
-        color: '#333',
-        borderLeft: '6px solid #ff4d4f',
-        boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-        padding: '20px',
-        borderRadius: '8px',
-        zIndex: '1000000',
-        fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-        animation: 'sentinel-fade-in 0.4s ease-out'
+        position: 'fixed', bottom: '30px', right: '30px', width: '320px',
+        backgroundColor: '#ffffff', color: '#333', borderLeft: `6px solid ${themeColor}`,
+        boxShadow: '0 10px 25px rgba(0,0,0,0.2)', padding: '20px', borderRadius: '8px',
+        zIndex: '1000000', fontFamily: "'Segoe UI', Roboto, sans-serif",
+        animation: 'sentinel-slide-in 0.4s ease-out'
     });
 
-    notify.innerHTML = `
-        <div style="display: flex; align-items: center; margin-bottom: 10px;">
-            <span style="font-size: 24px; margin-right: 10px;">⚠️</span>
-            <strong style="font-size: 16px; color: #ff4d4f;">偵測到潛在風險！</strong>
-        </div>
-        <div style="font-size: 14px; line-height: 1.5; margin-bottom: 12px;">
-            ${reason}
-        </div>
-        <div style="background: #f5f5f5; border-radius: 4px; height: 8px; width: 100%; position: relative;">
-            <div style="background: #ff4d4f; width: ${100 - score}%; height: 100%; border-radius: 4px;"></div>
-        </div>
-        <div style="font-size: 11px; color: #888; margin-top: 5px; text-align: right;">
-            危險指數: ${100 - score}%
-        </div>
-    `;
+    const headerRow = document.createElement('div');
+    Object.assign(headerRow.style, {
+        display: 'flex', alignItems: 'center', marginBottom: '8px'
+    });
+    const iconSpan = document.createElement('span');
+    iconSpan.style.fontSize = '20px';
+    iconSpan.style.marginRight = '10px';
+    iconSpan.textContent = '🚨';
+    const titleStrong = document.createElement('strong');
+    Object.assign(titleStrong.style, { fontSize: '15px', color: '#ff4d4f' });
+    titleStrong.textContent = '分析報告：高風險內容';
+    headerRow.appendChild(iconSpan);
+    headerRow.appendChild(titleStrong);
 
-    // 注入動畫 CSS
-    const styleTag = document.createElement('style');
-    styleTag.textContent = `
-        @keyframes sentinel-fade-in {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-    `;
-    document.head.appendChild(styleTag);
+    const quoteBox = document.createElement('div');
+    Object.assign(quoteBox.style, {
+        fontStyle: 'italic', color: '#666', fontSize: '12px', background: '#f9f9f9',
+        padding: '8px', borderRadius: '4px', marginBottom: '10px', borderLeft: '3px solid #ddd'
+    });
+    quoteBox.textContent = shortText ? `"${shortText}"` : '""';
+
+    const reasonRow = document.createElement('div');
+    Object.assign(reasonRow.style, {
+        fontSize: '14px', lineHeight: '1.4', marginBottom: '12px'
+    });
+    const reasonLabel = document.createElement('strong');
+    reasonLabel.textContent = '原因：';
+    reasonRow.appendChild(reasonLabel);
+    reasonRow.appendChild(document.createTextNode(typeof reason === 'string' ? reason : ''));
+
+    const barOuter = document.createElement('div');
+    Object.assign(barOuter.style, {
+        background: '#eee', height: '10px', borderRadius: '5px',
+        overflow: 'hidden', position: 'relative'
+    });
+    const barInner = document.createElement('div');
+    Object.assign(barInner.style, {
+        background: '#ff4d4f',
+        width: `${risk}%`,
+        height: '100%',
+        transition: 'width 0.8s ease'
+    });
+    barOuter.appendChild(barInner);
+
+    const footerRow = document.createElement('div');
+    Object.assign(footerRow.style, {
+        fontSize: '12px', color: '#666', marginTop: '6px',
+        display: 'flex', justifyContent: 'space-between'
+    });
+    const trustSpan = document.createElement('span');
+    trustSpan.textContent = `信任值: ${safeScore}%`;
+    const riskSpan = document.createElement('span');
+    Object.assign(riskSpan.style, { fontWeight: 'bold', color: '#ff4d4f' });
+    riskSpan.textContent = `風險佔比: ${risk}%`;
+    footerRow.appendChild(trustSpan);
+    footerRow.appendChild(riskSpan);
+
+    notify.appendChild(headerRow);
+    notify.appendChild(quoteBox);
+    notify.appendChild(reasonRow);
+    notify.appendChild(barOuter);
+    notify.appendChild(footerRow);
 
     document.body.appendChild(notify);
 
-    // 6秒後自動移除
     setTimeout(() => {
-        notify.style.opacity = '0';
-        notify.style.transition = 'opacity 0.5s ease';
-        setTimeout(() => notify.remove(), 500);
+        if (document.body.contains(notify)) {
+            notify.style.opacity = '0';
+            notify.style.transition = 'opacity 0.5s';
+            setTimeout(() => notify.remove(), 500);
+        }
     }, 6000);
 }
