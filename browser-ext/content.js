@@ -34,7 +34,7 @@ async function analyzeText(text) {
 
         // 如果後端判斷為危險，則顯示通知
         if (data.label === "Danger") {
-            showSafetyNotification(data.reason, data.trust_score);
+            showSafetyNotification(data.reason, data.trust_score, text);
         }
     } catch (error) {
         console.error("Sentinel-Core 連線失敗:", error);
@@ -48,11 +48,15 @@ function showSafetyNotification(reason, score, quotedText = "") {
 
     const notify = document.createElement('div');
     notify.id = 'sentinel-notify';
-    
-    // 根據分數決定顏色：極度危險(紅) vs 警告(橘)
-    const themeColor = score <= 30 ? '#ff4d4f' : '#faad14';
-    const shortText = quotedText.length > 25 ? quotedText.substring(0, 25) + "..." : quotedText;
-    const risk = (100 - score); // 直接拿整數
+
+    const scoreNum = Number(score);
+    const safeScore = Number.isFinite(scoreNum)
+        ? Math.max(0, Math.min(100, Math.round(scoreNum)))
+        : 0;
+    const themeColor = safeScore <= 30 ? '#ff4d4f' : '#faad14';
+    const qt = typeof quotedText === 'string' ? quotedText : '';
+    const shortText = qt.length > 25 ? qt.substring(0, 25) + '...' : qt;
+    const risk = 100 - safeScore;
 
     Object.assign(notify.style, {
         position: 'fixed', bottom: '30px', right: '30px', width: '320px',
@@ -62,34 +66,69 @@ function showSafetyNotification(reason, score, quotedText = "") {
         animation: 'sentinel-slide-in 0.4s ease-out'
     });
 
-    // 在 showSafetyNotification 函式內修改 innerHTML
+    const headerRow = document.createElement('div');
+    Object.assign(headerRow.style, {
+        display: 'flex', alignItems: 'center', marginBottom: '8px'
+    });
+    const iconSpan = document.createElement('span');
+    iconSpan.style.fontSize = '20px';
+    iconSpan.style.marginRight = '10px';
+    iconSpan.textContent = '🚨';
+    const titleStrong = document.createElement('strong');
+    Object.assign(titleStrong.style, { fontSize: '15px', color: '#ff4d4f' });
+    titleStrong.textContent = '分析報告：高風險內容';
+    headerRow.appendChild(iconSpan);
+    headerRow.appendChild(titleStrong);
 
+    const quoteBox = document.createElement('div');
+    Object.assign(quoteBox.style, {
+        fontStyle: 'italic', color: '#666', fontSize: '12px', background: '#f9f9f9',
+        padding: '8px', borderRadius: '4px', marginBottom: '10px', borderLeft: '3px solid #ddd'
+    });
+    quoteBox.textContent = shortText ? `"${shortText}"` : '""';
 
-    notify.innerHTML = `
-    <div style="display: flex; align-items: center; margin-bottom: 8px;">
-        <span style="font-size: 20px; margin-right: 10px;">🚨</span>
-        <strong style="font-size: 15px; color: #ff4d4f;">分析報告：高風險內容</strong>
-    </div>
-    
-    <div style="font-style: italic; color: #666; font-size: 12px; background: #f9f9f9; padding: 8px; border-radius: 4px; margin-bottom: 10px; border-left: 3px solid #ddd;">
-        "${shortText}"
-    </div>
+    const reasonRow = document.createElement('div');
+    Object.assign(reasonRow.style, {
+        fontSize: '14px', lineHeight: '1.4', marginBottom: '12px'
+    });
+    const reasonLabel = document.createElement('strong');
+    reasonLabel.textContent = '原因：';
+    reasonRow.appendChild(reasonLabel);
+    reasonRow.appendChild(document.createTextNode(typeof reason === 'string' ? reason : ''));
 
-    <div style="font-size: 14px; line-height: 1.4; margin-bottom: 12px;">
-        <strong>原因：</strong>${reason}
-    </div>
+    const barOuter = document.createElement('div');
+    Object.assign(barOuter.style, {
+        background: '#eee', height: '10px', borderRadius: '5px',
+        overflow: 'hidden', position: 'relative'
+    });
+    const barInner = document.createElement('div');
+    Object.assign(barInner.style, {
+        background: '#ff4d4f',
+        width: `${risk}%`,
+        height: '100%',
+        transition: 'width 0.8s ease'
+    });
+    barOuter.appendChild(barInner);
 
-    <div style="background: #eee; height: 10px; border-radius: 5px; overflow: hidden; position: relative;">
-        <div style="background: #ff4d4f; width: ${risk}%; height: 100%; transition: width 0.8s ease;"></div>
-    </div>
-    
-    <div style="font-size: 12px; color: #666; margin-top: 6px; display: flex; justify-content: space-between;">
-        <span>信任值: ${score}%</span>
-        <span style="font-weight: bold; color: #ff4d4f;">風險佔比: ${risk}%</span>
-    </div>
-`;
+    const footerRow = document.createElement('div');
+    Object.assign(footerRow.style, {
+        fontSize: '12px', color: '#666', marginTop: '6px',
+        display: 'flex', justifyContent: 'space-between'
+    });
+    const trustSpan = document.createElement('span');
+    trustSpan.textContent = `信任值: ${safeScore}%`;
+    const riskSpan = document.createElement('span');
+    Object.assign(riskSpan.style, { fontWeight: 'bold', color: '#ff4d4f' });
+    riskSpan.textContent = `風險佔比: ${risk}%`;
+    footerRow.appendChild(trustSpan);
+    footerRow.appendChild(riskSpan);
 
-    // 注入動畫 CSS (略，保持你原本的 sentinel-slide-in)
+    notify.appendChild(headerRow);
+    notify.appendChild(quoteBox);
+    notify.appendChild(reasonRow);
+    notify.appendChild(barOuter);
+    notify.appendChild(footerRow);
+
     document.body.appendChild(notify);
 
     setTimeout(() => {
