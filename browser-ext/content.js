@@ -3,6 +3,13 @@
  * 已整合：微服務 Gateway、三色主題、錯誤處理、流暢動畫
  */
 
+// --- 工具函式：防止 XSS ---
+function escapeHTML(str) {
+    const div = document.createElement('div');
+    div.textContent = String(str);
+    return div.innerHTML;
+}
+
 // --- 1. 監聽選取事件 ---
 document.addEventListener('mouseup', function() {
     let selection = window.getSelection();
@@ -30,26 +37,26 @@ async function analyzeText(text) {
             showSafetyNotification(data.reason, data.trust_score, text);
         } else if (response.status === 429) {
             // 對接組員實作的 Rate Limiting
-            showSafetyNotification("請求過於頻繁，請稍後再試。", 50, "系統限流", "#faad14", "⏳");
+            showSafetyNotification("請求過於頻繁，請稍後再試。", 50, "", "#faad14", "⏳", "系統限流");
         } else {
             // 處理 502, 503, 504 等伺服器異常
-            showSafetyNotification(`偵測服務異常 (${response.status})`, 0, "連線故障", "#8c8c8c", "🛠️");
+            showSafetyNotification(`偵測服務異常 (${response.status})`, 0, "", "#8c8c8c", "🛠️", "連線故障");
         }
 
     } catch (error) {
         console.error("Sentinel-Core 連線失敗:", error);
-        showSafetyNotification("無法連線至網關，請確認後端是否啟動。", 0, "連線失敗", "#8c8c8c", "❌");
+        showSafetyNotification("無法連線至網關，請確認後端是否啟動。", 0, "", "#8c8c8c", "❌", "連線失敗");
     }
 }
 
 // --- 3. UI 注入與動態主題 ---
-function showSafetyNotification(reason, score, quotedText = "", overrideColor = null, overrideIcon = null) {
+function showSafetyNotification(reason, score, quotedText = "", overrideColor = null, overrideIcon = null, overrideTitle = null) {
     // 移除舊通知
     const oldNotify = document.getElementById('sentinel-notify');
     if (oldNotify) oldNotify.remove();
 
-    // 計算數據
-    const s = Math.round(Number(score));
+    // 計算數據（修復：clamp 至 0-100 防止溢出）
+    const s = Math.max(0, Math.min(100, Math.round(Number(score) || 0)));
     const risk = 100 - s;
 
     // --- [v1.2 主題引擎] ---
@@ -62,6 +69,7 @@ function showSafetyNotification(reason, score, quotedText = "", overrideColor = 
 
     const finalColor = overrideColor || theme.color;
     const finalIcon = overrideIcon || theme.icon;
+    const finalTitle = overrideTitle || theme.title;
 
     // 建立通知容器
     const notify = document.createElement('div');
@@ -74,16 +82,18 @@ function showSafetyNotification(reason, score, quotedText = "", overrideColor = 
         animation: 'sentinel-slide-in 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28)'
     });
 
-    // 內容模板
+    // 修復 XSS：使用 escapeHTML 處理所有來自外部的字串
+    const shortText = quotedText.length > 25 ? quotedText.substring(0, 25) + '...' : quotedText;
     notify.innerHTML = `
         <div style="display:flex; align-items:center; margin-bottom:10px;">
             <span style="font-size:22px; margin-right:10px;">${finalIcon}</span>
-            <strong style="font-size:16px; color:${finalColor};">${theme.title}</strong>
+            <strong style="font-size:16px; color:${finalColor};">${escapeHTML(finalTitle)}</strong>
         </div>
+        ${shortText ? `
         <div style="font-style:italic; color:#666; font-size:12px; background:#f8f9fa; padding:10px; border-radius:6px; margin-bottom:12px; border-left:3px solid #ddd;">
-            "${quotedText.length > 25 ? quotedText.substring(0, 25) + '...' : quotedText}"
-        </div>
-        <div style="font-size:14px; line-height:1.5; margin-bottom:15px;">${reason}</div>
+            "${escapeHTML(shortText)}"
+        </div>` : ''}
+        <div style="font-size:14px; line-height:1.5; margin-bottom:15px;">${escapeHTML(reason)}</div>
         <div style="background:#eee; height:8px; border-radius:4px; overflow:hidden;">
             <div id="sentinel-bar" style="background:${finalColor}; width:0%; height:100%; transition:width 1.2s cubic-bezier(0.1, 0.7, 0.1, 1);"></div>
         </div>
@@ -97,9 +107,9 @@ function showSafetyNotification(reason, score, quotedText = "", overrideColor = 
         const style = document.createElement('style');
         style.id = 'sentinel-style';
         style.innerHTML = `
-            @keyframes sentinel-slide-in { 
-                from { opacity:0; transform:translateX(50px); } 
-                to { opacity:1; transform:translateX(0); } 
+            @keyframes sentinel-slide-in {
+                from { opacity:0; transform:translateX(50px); }
+                to { opacity:1; transform:translateX(0); }
             }
         `;
         document.head.appendChild(style);
