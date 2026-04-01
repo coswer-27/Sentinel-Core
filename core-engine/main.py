@@ -1,53 +1,54 @@
+import time
 from fastapi import FastAPI
-from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-from transformers import pipeline  # 🚀 關鍵：導入 AI 套件
-import uvicorn
+from pydantic import BaseModel
+from transformers import pipeline
 
 app = FastAPI()
 
-# 保持 CORS 設定，讓前端能連線
+# --- [關鍵 1] CORS 最強防禦：解決 OPTIONS / 405 問題 ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],  # 務必維持 ["*"] 才能自動處理 OPTIONS
     allow_headers=["*"],
 )
 
-# 🛠️ 第一次執行會下載模型 (約 200~500MB)，請耐心等候
-# 我們使用多語言 BERT 模型來分析語意偏向
-print("⏳ 正在載入 AI 模型，請稍候...")
-classifier = pipeline(
-    "sentiment-analysis", 
-    model="nlptown/bert-base-multilingual-uncased-sentiment"
-)
-print("✅ AI 模型載入完成！")
+# --- [關鍵 2] 模型預載入：解決啟動過慢問題 ---
+print("⏳ [System] 正在初始化 BERT 模型...")
+start_time = time.time()
 
-class SecurityRequest(BaseModel):
+# 這裡使用全域變數，確保啟動即就緒
+try:
+    # 使用與你 Log 中對應的模型
+    classifier = pipeline("sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment")
+    print(f"✅ [System] 模型載入成功！耗時: {time.time() - start_time:.2f} 秒")
+except Exception as e:
+    print(f"❌ [System] 模型載入失敗: {e}")
+
+class AnalysisRequest(BaseModel):
     content: str
 
 @app.post("/analyze")
-async def analyze(request: SecurityRequest):
-    print(f"🔮 AI 正在分析語意: {request.content}")
+async def analyze(data: AnalysisRequest):
+    print(f"📡 收到分析請求，內容長度: {len(data.content)}")
     
-    # 執行 AI 推論
-    # result 會回傳 [{'label': '1 star', 'score': 0.85}]
-    # 1-2 stars 代表負面/激進/異常；4-5 stars 代表中性/正面
-    prediction = classifier(request.content)[0]
-    label = prediction['label']
-    confidence = prediction['score']
-
-    # 判斷邏輯：如果語意過於負面或激進 (1-2 stars)，視為潛在威脅
-    is_danger = label in ["1 star", "2 stars"]
+    # 直接使用全域的 classifier
+    result = classifier(data.content)
     
-    # 計算信任分數 (將 AI 分數轉換為百分比)
-    display_score = int(confidence * 100) if not is_danger else 20
-
+    # 範例邏輯：將星等轉為分數
+    label = result[0]['label'] # 例如 "1 star"
+    stars = int(label.split()[0])
+    trust_score = stars * 20
+    
     return {
-        "label": "Danger" if is_danger else "Safe",
-        "trust_score": display_score,
-        "reason": f"AI 偵測到異常語意偏好 ({label})。內容可能含有強迫性或詐騙誘導。" if is_danger else "語意分析正常"
+        "label": "Danger" if stars <= 2 else "Safe",
+        "trust_score": trust_score,
+        "reason": f"AI 偵測到語意情緒為 {label}，判定風險權重為 {100 - trust_score}%。"
     }
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    import uvicorn
+    # 建議直接執行 python main.py，或者用 uvicorn main:app --reload
+    uvicorn.run(app, host="127.0.0.1", port=8000)

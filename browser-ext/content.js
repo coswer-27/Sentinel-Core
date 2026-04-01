@@ -34,22 +34,28 @@ async function analyzeText(text) {
 
         // 如果後端判斷為危險，則顯示通知
         if (data.label === "Danger") {
-            showSafetyNotification(data.reason, data.trust_score);
+            showSafetyNotification(data.reason, data.trust_score, text);
         }
     } catch (error) {
         console.error("Sentinel-Core 連線失敗:", error);
     }
 }
 
-// --- 3. UI 注入函式 (Toast Notification) ---
-function showSafetyNotification(reason, score) {
-    // 檢查是否已經有通知存在，避免重複彈出
-    if (document.getElementById('sentinel-notify')) return;
+// --- 3. UI 注入函式 (專門修復 UI-04 重疊與消失邏輯) ---
+function showSafetyNotification(reason, score, quotedText) {
+    // 【關鍵修復 1】：強制移除舊的通知框，確保新通知能立即「取代」而非「重疊」
+    const oldNotify = document.getElementById('sentinel-notify');
+    if (oldNotify) {
+        oldNotify.remove(); 
+        console.log("♻️ 偵測到舊通知，已執行物理移除以防止重疊");
+    }
 
     const notify = document.createElement('div');
     notify.id = 'sentinel-notify';
     
-    // 設定樣式 (使用 JS Inline Style 確保樣式隔離)
+    const shortText = quotedText.length > 30 ? quotedText.substring(0, 30) + "..." : quotedText
+
+    // 設定樣式 (保持原本專業的外觀)
     Object.assign(notify.style, {
         position: 'fixed',
         bottom: '30px',
@@ -63,17 +69,22 @@ function showSafetyNotification(reason, score) {
         borderRadius: '8px',
         zIndex: '1000000',
         fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-        animation: 'sentinel-fade-in 0.4s ease-out'
+        // 【關鍵修復 2】：使用動畫讓每次「取代」都有感
+        animation: 'sentinel-slide-in 0.4s ease-out'
     });
 
     notify.innerHTML = `
         <div style="display: flex; align-items: center; margin-bottom: 10px;">
-            <span style="font-size: 24px; margin-right: 10px;">⚠️</span>
-            <strong style="font-size: 16px; color: #ff4d4f;">偵測到潛在風險！</strong>
+            <strong style="font-size: 15px; color: #ff4d4f;">分析報告：高風險內容</strong>
         </div>
+        <div style="font-style: italic; color: #666; font-size: 12px; background: #f9f9f9; padding: 8px; border-radius: 4px; margin-bottom: 10px; border-left: 3px solid #ddd;">
+            "${shortText}"
+        </div>
+
         <div style="font-size: 14px; line-height: 1.5; margin-bottom: 12px;">
-            ${reason}
+            <strong>Reason:</strong>${reason}
         </div>
+
         <div style="background: #f5f5f5; border-radius: 4px; height: 8px; width: 100%; position: relative;">
             <div style="background: #ff4d4f; width: ${100 - score}%; height: 100%; border-radius: 4px;"></div>
         </div>
@@ -82,22 +93,29 @@ function showSafetyNotification(reason, score) {
         </div>
     `;
 
-    // 注入動畫 CSS
-    const styleTag = document.createElement('style');
-    styleTag.textContent = `
-        @keyframes sentinel-fade-in {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-    `;
-    document.head.appendChild(styleTag);
+    // 注入動畫 CSS (如果尚未存在)
+    if (!document.getElementById('sentinel-style')) {
+        const styleTag = document.createElement('style');
+        styleTag.id = 'sentinel-style';
+        styleTag.textContent = `
+            @keyframes sentinel-slide-in {
+                from { opacity: 0; transform: translateX(50px); }
+                to { opacity: 1; transform: translateX(0); }
+            }
+        `;
+        document.head.appendChild(styleTag);
+    }
 
     document.body.appendChild(notify);
 
-    // 6秒後自動移除
+    // 【關鍵修復 3】：確保 6 秒後移除的是「當前這一個」DOM 實例
     setTimeout(() => {
-        notify.style.opacity = '0';
-        notify.style.transition = 'opacity 0.5s ease';
-        setTimeout(() => notify.remove(), 500);
+        if (document.body.contains(notify)) {
+            notify.style.opacity = '0';
+            notify.style.transition = 'opacity 0.5s ease';
+            setTimeout(() => {
+                if (document.body.contains(notify)) notify.remove();
+            }, 500);
+        }
     }, 6000);
 }
