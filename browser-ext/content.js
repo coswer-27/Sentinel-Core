@@ -124,6 +124,16 @@ function showSafetyNotification(reason, score) {
 const BACKEND_URL = "http://127.0.0.1:8000";
 const scannedUrls = new Set();
 
+const scannedResults = new Map(); // href -> result，用於 Google DOM 刷新後重新注入
+const pendingScans = new Set();   // 正在掃描中的 href，避免重複觸發
+
+const SC_STATUS_COLORS = {
+    safe:       "#4fc3f7",  // 藍色
+    suspicious: "#f59e0b",  // 橘黃色
+    malicious:  "#dc3545",  // 紅色
+    default:    "#4fc3f7",  // 未知 fallback
+};
+
 function debounce(fn, delay) {
     let timer;
     return (...args) => {
@@ -148,7 +158,7 @@ function collectAnchorsFromRoot(root, seen, currentHost, out) {
         if (!href || seen.has(href)) continue;
         try {
             const host = new URL(href).hostname;
-            if (host === currentHost || host === "") continue;
+            // if (host === currentHost || host === "") continue;
         } catch {
             continue;
         }
@@ -232,6 +242,8 @@ function positionFloatingTooltip(targetEl) {
         return;
     }
 
+    const status = targetEl.getAttribute("data-sc-status") || "default";
+    tip.style.borderLeft = `4px solid ${SC_STATUS_COLORS[status] ?? SC_STATUS_COLORS.default}`;
     tip.textContent = text;
     // 固定右下角，不需要動態計算座標
     tip.style.visibility = "visible";
@@ -243,6 +255,15 @@ function showFloatingTooltip(targetEl) {
     positionFloatingTooltip(targetEl);
 }
 
+function showFloatingTooltipDirect(text, borderColor = SC_STATUS_COLORS.default) {
+    const tip = getOrCreateFloatingTooltip();
+    scTooltipActiveTarget = null;
+    tip.style.borderLeft = `4px solid ${borderColor}`;
+    tip.textContent = text;
+    tip.style.visibility = "visible";
+    tip.style.opacity = "1";
+}
+
 function initSentinelFloatingTooltips() {
     if (scTooltipListenersBound) return;
     scTooltipListenersBound = true;
@@ -250,10 +271,15 @@ function initSentinelFloatingTooltips() {
     document.addEventListener(
         "mouseover",
         (e) => {
+            // 已掃描：直接顯示 tooltip
             const t = e.target.closest("[data-sc-tooltip]");
-            if (!t || !document.documentElement.contains(t)) return;
-            if (scTooltipActiveTarget === t) return;
-            showFloatingTooltip(t);
+            if (t && document.documentElement.contains(t)) {
+                if (scTooltipActiveTarget !== t) showFloatingTooltip(t);
+                return;
+            }
+            // 未掃描：hover 時觸發掃描
+            const a = e.target.closest("a[href]");
+            if (a) scanOnHover(a);
         },
         true
     );
@@ -276,11 +302,47 @@ function ensureScanStyles() {
     const style = document.createElement("style");
     style.id = "sc-styles";
     style.textContent = `
-      .sc-badge { font-size: 0.85em; margin-left: 4px; cursor: help; vertical-align: middle; }
-      .sc-malicious { outline: 2px solid red; border-radius: 2px; }
-      .sc-suspicious { background: #fff3cd; border-radius: 2px; }
-      a.sc-flagged-malicious { outline: 2px solid #dc3545 !important; }
-      a.sc-flagged-suspicious { background: rgba(255,193,7,0.2) !important; }
+      .sc-badge {
+        display: inline-flex;
+        align-items: center;
+        font-size: 0.78em;
+        font-weight: 600;
+        margin-left: 5px;
+        padding: 1px 6px;
+        border-radius: 4px;
+        cursor: help;
+        vertical-align: middle;
+        line-height: 1.4;
+        letter-spacing: 0.02em;
+      }
+      .sc-badge.sc-malicious {
+        background: ${SC_STATUS_COLORS.malicious}1f;
+        color: #b91c1c;
+        border: 1px solid ${SC_STATUS_COLORS.malicious}59;
+      }
+      .sc-badge.sc-suspicious {
+        background: ${SC_STATUS_COLORS.suspicious}1f;
+        color: #92400e;
+        border: 1px solid ${SC_STATUS_COLORS.suspicious}59;
+      }
+      a.sc-flagged-safe {
+        outline: 2px solid ${SC_STATUS_COLORS.safe} !important;
+        outline-offset: 2px !important;
+        border-radius: 3px !important;
+        text-decoration-color: ${SC_STATUS_COLORS.safe} !important;
+      }
+      a.sc-flagged-malicious {
+        outline: 2px solid ${SC_STATUS_COLORS.malicious} !important;
+        outline-offset: 2px !important;
+        border-radius: 3px !important;
+        text-decoration-color: ${SC_STATUS_COLORS.malicious} !important;
+      }
+      a.sc-flagged-suspicious {
+        outline: 2px solid ${SC_STATUS_COLORS.suspicious} !important;
+        outline-offset: 2px !important;
+        border-radius: 3px !important;
+        text-decoration-color: ${SC_STATUS_COLORS.suspicious} !important;
+      }
     `;
     document.head.appendChild(style);
 }
@@ -294,71 +356,65 @@ function injectWarningUI(anchorEl, result) {
         return;
     }
 
-    const badge = document.createElement("span");
     const lower = result.label.toLowerCase();
-    badge.className = `sc-badge sc-${lower}`;
-    badge.textContent = result.label === "Malicious" ? "⚠️" : "❓";
-    if (result.label === "Malicious") {
-        badge.title = `⚠️ 危險：${result.reason}`;
-    } else {
-        badge.title = `❓ 可疑：${result.reason}`;
-    }
+    const isMalicious = result.label === "Malicious";
+    const tooltipText = isMalicious
+        ? `⚠️ 危險：${result.reason}`
+        : `❓ 可疑：${result.reason}`;
 
     anchorEl.setAttribute("data-sc-status", lower);
     anchorEl.classList.add(`sc-flagged-${lower}`);
+    injectTooltip(anchorEl, tooltipText);
+
+    const badge = document.createElement("span");
+    badge.className = `sc-badge sc-${lower}`;
+    badge.textContent = isMalicious ? "⚠️ 危險" : "❓ 可疑";
     anchorEl.insertAdjacentElement("afterend", badge);
 }
 
-async function scanNewLinks(anchors) {
-    const fresh = anchors.filter((a) => !scannedUrls.has(a.href));
-    if (fresh.length === 0) return;
+async function scanOnHover(anchorEl) {
+    const href = anchorEl.href;
+    if (!href || scannedUrls.has(href) || pendingScans.has(href)) return;
 
-    fresh.forEach((a) => scannedUrls.add(a.href));
+    pendingScans.add(href);
+    scannedUrls.add(href);
 
-    let toast = document.getElementById("sc-scanning-toast");
-    if (!toast) {
-        toast = document.createElement("div");
-        toast.id = "sc-scanning-toast";
-        toast.style.cssText =
-            "position:fixed;bottom:20px;right:20px;background:#333;color:#fff;padding:10px 16px;border-radius:8px;z-index:99999;font-size:13px;";
-        document.body.appendChild(toast);
-    }
-    toast.textContent = `🔍 Sentinel 掃描中... (0/${fresh.length})`;
+    showFloatingTooltipDirect("🔍 Sentinel 掃描中...");
 
     try {
         const data = await sentinelBackendFetch(`${BACKEND_URL}/analyze/links`, {
             method: "POST",
-            body: { urls: fresh.map((a) => a.href) },
+            body: { urls: [href] },
         });
 
-        const urlMap = new Map(fresh.map((a) => [a.href, a]));
-        data.results.forEach((result) => {
-            const el = urlMap.get(result.url);
-            if (el) injectWarningUI(el, result);
-        });
-
-        const dangerous = data.results.filter((r) => r.label === "Malicious").length;
-        const suspicious = data.results.filter((r) => r.label === "Suspicious").length;
-        toast.textContent = `✅ 掃描完成：${dangerous} 危險 / ${suspicious} 可疑 / ${fresh.length} 個連結`;
+        const result = data.results[0];
+        if (result) {
+            scannedResults.set(result.url, result);
+            injectWarningUI(anchorEl, result);
+            if (document.documentElement.contains(anchorEl)) {
+                showFloatingTooltip(anchorEl);
+            } else {
+                hideFloatingTooltip();
+            }
+        } else {
+            hideFloatingTooltip();
+        }
     } catch (err) {
-        toast.textContent = "⚠️ 掃描失敗，後端無法連線";
-        fresh.forEach((a) => scannedUrls.delete(a.href));
+        showFloatingTooltipDirect("⚠️ 掃描失敗，後端無法連線", SC_STATUS_COLORS.malicious);
+        scannedUrls.delete(href);
+        setTimeout(() => hideFloatingTooltip(), 3000);
     } finally {
-        setTimeout(() => {
-            const t = document.getElementById("sc-scanning-toast");
-            if (t) t.remove();
-        }, 5000);
+        pendingScans.delete(href);
     }
 }
 
-async function scanAllLinks() {
-    const anchors = extractPageLinks();
-    await scanNewLinks(anchors);
-}
-
 const debouncedObserve = debounce(() => {
-    const newAnchors = extractPageLinks().filter((a) => !scannedUrls.has(a.href));
-    if (newAnchors.length > 0) scanNewLinks(newAnchors);
+    // Google 等動態頁面會替換 DOM 節點，需重新注入已快取的結果
+    extractPageLinks().forEach((a) => {
+        if (scannedResults.has(a.href) && !a.getAttribute("data-sc-tooltip")) {
+            injectWarningUI(a, scannedResults.get(a.href));
+        }
+    });
 }, 800);
 
 const observer = new MutationObserver(() => {
@@ -367,7 +423,6 @@ const observer = new MutationObserver(() => {
 
 function bootSentinelLinkScanner() {
     initSentinelFloatingTooltips();
-    scanAllLinks();
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["href"] });
 }
 
