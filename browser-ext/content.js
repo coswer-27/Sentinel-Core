@@ -27,19 +27,21 @@ async function analyzeText(text) {
         const response = await fetch('http://127.0.0.1:8000/analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: text })
+            // body 增加 url 欄位
+            body: JSON.stringify({ 
+                content: text,
+                url: window.location.href, 
+                timestamp: new Date().toISOString() 
+            })
         });
 
         const data = await response.json();
 
         if (response.ok) {
-            // v1.2 改動：不論標籤為何，都呼叫 UI 顯示，展現三色動態
             showSafetyNotification(data.reason, data.trust_score, text);
         } else if (response.status === 429) {
-            // 對接組員實作的 Rate Limiting
             showSafetyNotification("請求過於頻繁，請稍後再試。", 50, "", "#faad14", "⏳", "系統限流");
         } else {
-            // 處理 502, 503, 504 等伺服器異常
             showSafetyNotification(`偵測服務異常 (${response.status})`, 0, "", "#8c8c8c", "🛠️", "連線故障");
         }
 

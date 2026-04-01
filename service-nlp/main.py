@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from detectors.bert_engine import BertDetector
+from typing import Optional
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -13,6 +14,8 @@ TRUST_THRESHOLD = 55
 
 class AnalyzeRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
+    url: Optional[str] = None       # 同步新增
+    timestamp: Optional[str] = None # 同步新增
 
     @field_validator("content")
     @classmethod

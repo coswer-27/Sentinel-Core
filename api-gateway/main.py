@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from typing import Optional
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,6 +30,8 @@ def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
 
 class AnalyzeRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
+    url: Optional[str] = None  # v2.1 核心改動
+    timestamp: Optional[str] = None
 
     @field_validator("content")
     @classmethod
@@ -66,6 +69,7 @@ async def health():
 @app.post("/analyze")
 @limiter.limit("10/minute")
 async def gateway(request: Request, body: AnalyzeRequest):
+    logger.info(f"[Gateway] 收到請求 - 網址: {body.url}, 時間: {body.timestamp}")
     try:
         resp = await request.app.state.http_client.post(
             NLP_URL, json=body.model_dump()
