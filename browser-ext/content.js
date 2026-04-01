@@ -41,63 +41,62 @@ async function analyzeText(text) {
     }
 }
 
-// --- 3. UI 注入函式 (Toast Notification) ---
-function showSafetyNotification(reason, score) {
-    // 檢查是否已經有通知存在，避免重複彈出
-    if (document.getElementById('sentinel-notify')) return;
+function showSafetyNotification(reason, score, quotedText = "") {
+    // 物理移除舊通知
+    const oldNotify = document.getElementById('sentinel-notify');
+    if (oldNotify) oldNotify.remove();
 
     const notify = document.createElement('div');
     notify.id = 'sentinel-notify';
     
-    // 設定樣式 (使用 JS Inline Style 確保樣式隔離)
+    // 根據分數決定顏色：極度危險(紅) vs 警告(橘)
+    const themeColor = score <= 30 ? '#ff4d4f' : '#faad14';
+    const shortText = quotedText.length > 25 ? quotedText.substring(0, 25) + "..." : quotedText;
+    const risk = (100 - score); // 直接拿整數
+
     Object.assign(notify.style, {
-        position: 'fixed',
-        bottom: '30px',
-        right: '30px',
-        width: '320px',
-        backgroundColor: '#ffffff',
-        color: '#333',
-        borderLeft: '6px solid #ff4d4f',
-        boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-        padding: '20px',
-        borderRadius: '8px',
-        zIndex: '1000000',
-        fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-        animation: 'sentinel-fade-in 0.4s ease-out'
+        position: 'fixed', bottom: '30px', right: '30px', width: '320px',
+        backgroundColor: '#ffffff', color: '#333', borderLeft: `6px solid ${themeColor}`,
+        boxShadow: '0 10px 25px rgba(0,0,0,0.2)', padding: '20px', borderRadius: '8px',
+        zIndex: '1000000', fontFamily: "'Segoe UI', Roboto, sans-serif",
+        animation: 'sentinel-slide-in 0.4s ease-out'
     });
 
+    // 在 showSafetyNotification 函式內修改 innerHTML
+
+
     notify.innerHTML = `
-        <div style="display: flex; align-items: center; margin-bottom: 10px;">
-            <span style="font-size: 24px; margin-right: 10px;">⚠️</span>
-            <strong style="font-size: 16px; color: #ff4d4f;">偵測到潛在風險！</strong>
-        </div>
-        <div style="font-size: 14px; line-height: 1.5; margin-bottom: 12px;">
-            ${reason}
-        </div>
-        <div style="background: #f5f5f5; border-radius: 4px; height: 8px; width: 100%; position: relative;">
-            <div style="background: #ff4d4f; width: ${100 - score}%; height: 100%; border-radius: 4px;"></div>
-        </div>
-        <div style="font-size: 11px; color: #888; margin-top: 5px; text-align: right;">
-            危險指數: ${100 - score}%
-        </div>
-    `;
+    <div style="display: flex; align-items: center; margin-bottom: 8px;">
+        <span style="font-size: 20px; margin-right: 10px;">🚨</span>
+        <strong style="font-size: 15px; color: #ff4d4f;">分析報告：高風險內容</strong>
+    </div>
+    
+    <div style="font-style: italic; color: #666; font-size: 12px; background: #f9f9f9; padding: 8px; border-radius: 4px; margin-bottom: 10px; border-left: 3px solid #ddd;">
+        "${shortText}"
+    </div>
 
-    // 注入動畫 CSS
-    const styleTag = document.createElement('style');
-    styleTag.textContent = `
-        @keyframes sentinel-fade-in {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-    `;
-    document.head.appendChild(styleTag);
+    <div style="font-size: 14px; line-height: 1.4; margin-bottom: 12px;">
+        <strong>原因：</strong>${reason}
+    </div>
 
+    <div style="background: #eee; height: 10px; border-radius: 5px; overflow: hidden; position: relative;">
+        <div style="background: #ff4d4f; width: ${risk}%; height: 100%; transition: width 0.8s ease;"></div>
+    </div>
+    
+    <div style="font-size: 12px; color: #666; margin-top: 6px; display: flex; justify-content: space-between;">
+        <span>信任值: ${score}%</span>
+        <span style="font-weight: bold; color: #ff4d4f;">風險佔比: ${risk}%</span>
+    </div>
+`;
+
+    // 注入動畫 CSS (略，保持你原本的 sentinel-slide-in)
     document.body.appendChild(notify);
 
-    // 6秒後自動移除
     setTimeout(() => {
-        notify.style.opacity = '0';
-        notify.style.transition = 'opacity 0.5s ease';
-        setTimeout(() => notify.remove(), 500);
+        if (document.body.contains(notify)) {
+            notify.style.opacity = '0';
+            notify.style.transition = 'opacity 0.5s';
+            setTimeout(() => notify.remove(), 500);
+        }
     }, 6000);
 }
