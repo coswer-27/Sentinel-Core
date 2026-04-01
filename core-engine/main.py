@@ -1,54 +1,79 @@
 import time
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 from transformers import pipeline
 
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
-# --- [關鍵 1] CORS 最強防禦：解決 OPTIONS / 405 問題 ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],  # 務必維持 ["*"] 才能自動處理 OPTIONS
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- [關鍵 2] 模型預載入：解決啟動過慢問題 ---
 print("⏳ [System] 正在初始化 BERT 模型...")
 start_time = time.time()
 
-# 這裡使用全域變數，確保啟動即就緒
+classifier = None
 try:
-    # 使用與你 Log 中對應的模型
     classifier = pipeline("sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment")
     print(f"✅ [System] 模型載入成功！耗時: {time.time() - start_time:.2f} 秒")
 except Exception as e:
     print(f"❌ [System] 模型載入失敗: {e}")
 
-class AnalysisRequest(BaseModel):
-    content: str
+
+class SecurityRequest(BaseModel):
+    content: str = Field(..., max_length=5000)
+
 
 @app.post("/analyze")
-async def analyze(data: AnalysisRequest):
-    print(f"📡 收到分析請求，內容長度: {len(data.content)}")
-    
-    # 直接使用全域的 classifier
-    result = classifier(data.content)
-    
-    # 範例邏輯：將星等轉為分數
-    label = result[0]['label'] # 例如 "1 star"
-    stars = int(label.split()[0])
-    trust_score = stars * 20
-    
-    return {
-        "label": "Danger" if stars <= 2 else "Safe",
-        "trust_score": trust_score,
-        "reason": f"AI 偵測到語意情緒為 {label}，判定風險權重為 {100 - trust_score}%。"
+@limiter.limit("30/minute")
+async def analyze(request: Request, body: SecurityRequest):  # noqa: ARG001
+    if classifier is None:
+        raise HTTPException(status_code=503, detail="AI 模型未就緒，請稍後再試。")
+
+    print(f"🔮 AI 深度分析中: {body.content[:20]}...")
+
+    # 取得 Top_k=5 的所有星等機率
+    raw_results = classifier(body.content, top_k=5)
+    prob_dict = {res['label']: res['score'] for res in raw_results}
+
+    # 定義 0-100 的權重
+    weights = {
+        "1 star": 0,
+        "2 stars": 25,
+        "3 stars": 50,
+        "4 stars": 75,
+        "5 stars": 100
     }
+
+    # 計算加權得分並轉為整數百分比
+    # Formula: Score = Σ (Prob_i * Weight_i)
+    raw_score = sum(prob_dict[label] * weights[label] for label in weights)
+    trust_score_pct = int(round(raw_score))
+    trust_score_pct = max(5, min(95, trust_score_pct))
+
+    is_danger = trust_score_pct <= 55
+    risk_pct = 100 - trust_score_pct
+
+    return {
+        "label": "Danger" if is_danger else "Safe",
+        "trust_score": trust_score_pct,
+        "risk_percentage": risk_pct,
+        "reason": f"AI 偵測到高達 {risk_pct}% 的負面語意特徵，具備潛在誘導風險。" if is_danger else "語意特徵正常。"
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
-    # 建議直接執行 python main.py，或者用 uvicorn main:app --reload
     uvicorn.run(app, host="127.0.0.1", port=8000)

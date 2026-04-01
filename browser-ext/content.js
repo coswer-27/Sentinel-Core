@@ -7,7 +7,7 @@ document.addEventListener('mouseup', function(event) {
 
     let selection = window.getSelection();
     let selectedText = selection.toString().trim();
-    
+
     console.log("📝 選取的文字內容:", selectedText);
 
     if (selectedText.length >= 2) {
@@ -41,59 +41,89 @@ async function analyzeText(text) {
     }
 }
 
-// --- 3. UI 注入函式 (專門修復 UI-04 重疊與消失邏輯) ---
-function showSafetyNotification(reason, score, quotedText) {
-    // 【關鍵修復 1】：強制移除舊的通知框，確保新通知能立即「取代」而非「重疊」
+// --- 3. UI 注入函式 ---
+function showSafetyNotification(reason, score, quotedText = "") {
+    // 【修復 UI-04】物理移除舊通知，確保新通知取代而非重疊
     const oldNotify = document.getElementById('sentinel-notify');
-    if (oldNotify) {
-        oldNotify.remove(); 
-        console.log("♻️ 偵測到舊通知，已執行物理移除以防止重疊");
-    }
+    if (oldNotify) oldNotify.remove();
 
     const notify = document.createElement('div');
     notify.id = 'sentinel-notify';
-    
-    const shortText = quotedText.length > 30 ? quotedText.substring(0, 30) + "..." : quotedText
 
-    // 設定樣式 (保持原本專業的外觀)
+    const scoreNum = Number(score);
+    const safeScore = Number.isFinite(scoreNum)
+        ? Math.max(0, Math.min(100, Math.round(scoreNum)))
+        : 0;
+    const themeColor = safeScore <= 30 ? '#ff4d4f' : '#faad14';
+    const qt = typeof quotedText === 'string' ? quotedText : '';
+    const shortText = qt.length > 25 ? qt.substring(0, 25) + '...' : qt;
+    const risk = 100 - safeScore;
+
     Object.assign(notify.style, {
-        position: 'fixed',
-        bottom: '30px',
-        right: '30px',
-        width: '320px',
-        backgroundColor: '#ffffff',
-        color: '#333',
-        borderLeft: '6px solid #ff4d4f',
-        boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-        padding: '20px',
-        borderRadius: '8px',
-        zIndex: '1000000',
-        fontFamily: "'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-        // 【關鍵修復 2】：使用動畫讓每次「取代」都有感
+        position: 'fixed', bottom: '30px', right: '30px', width: '320px',
+        backgroundColor: '#ffffff', color: '#333', borderLeft: `6px solid ${themeColor}`,
+        boxShadow: '0 10px 25px rgba(0,0,0,0.2)', padding: '20px', borderRadius: '8px',
+        zIndex: '1000000', fontFamily: "'Segoe UI', Roboto, sans-serif",
         animation: 'sentinel-slide-in 0.4s ease-out'
     });
 
-    notify.innerHTML = `
-        <div style="display: flex; align-items: center; margin-bottom: 10px;">
-            <strong style="font-size: 15px; color: #ff4d4f;">分析報告：高風險內容</strong>
-        </div>
-        <div style="font-style: italic; color: #666; font-size: 12px; background: #f9f9f9; padding: 8px; border-radius: 4px; margin-bottom: 10px; border-left: 3px solid #ddd;">
-            "${shortText}"
-        </div>
+    const headerRow = document.createElement('div');
+    Object.assign(headerRow.style, { display: 'flex', alignItems: 'center', marginBottom: '8px' });
+    const iconSpan = document.createElement('span');
+    iconSpan.style.fontSize = '20px';
+    iconSpan.style.marginRight = '10px';
+    iconSpan.textContent = '🚨';
+    const titleStrong = document.createElement('strong');
+    Object.assign(titleStrong.style, { fontSize: '15px', color: '#ff4d4f' });
+    titleStrong.textContent = '分析報告：高風險內容';
+    headerRow.appendChild(iconSpan);
+    headerRow.appendChild(titleStrong);
 
-        <div style="font-size: 14px; line-height: 1.5; margin-bottom: 12px;">
-            <strong>Reason:</strong>${reason}
-        </div>
+    const quoteBox = document.createElement('div');
+    Object.assign(quoteBox.style, {
+        fontStyle: 'italic', color: '#666', fontSize: '12px', background: '#f9f9f9',
+        padding: '8px', borderRadius: '4px', marginBottom: '10px', borderLeft: '3px solid #ddd'
+    });
+    quoteBox.textContent = shortText ? `"${shortText}"` : '""';
 
-        <div style="background: #f5f5f5; border-radius: 4px; height: 8px; width: 100%; position: relative;">
-            <div style="background: #ff4d4f; width: ${100 - score}%; height: 100%; border-radius: 4px;"></div>
-        </div>
-        <div style="font-size: 11px; color: #888; margin-top: 5px; text-align: right;">
-            危險指數: ${100 - score}%
-        </div>
-    `;
+    const reasonRow = document.createElement('div');
+    Object.assign(reasonRow.style, { fontSize: '14px', lineHeight: '1.4', marginBottom: '12px' });
+    const reasonLabel = document.createElement('strong');
+    reasonLabel.textContent = '原因：';
+    reasonRow.appendChild(reasonLabel);
+    reasonRow.appendChild(document.createTextNode(typeof reason === 'string' ? reason : ''));
 
-    // 注入動畫 CSS (如果尚未存在)
+    const barOuter = document.createElement('div');
+    Object.assign(barOuter.style, {
+        background: '#eee', height: '10px', borderRadius: '5px',
+        overflow: 'hidden', position: 'relative'
+    });
+    const barInner = document.createElement('div');
+    Object.assign(barInner.style, {
+        background: '#ff4d4f', width: `${risk}%`, height: '100%', transition: 'width 0.8s ease'
+    });
+    barOuter.appendChild(barInner);
+
+    const footerRow = document.createElement('div');
+    Object.assign(footerRow.style, {
+        fontSize: '12px', color: '#666', marginTop: '6px',
+        display: 'flex', justifyContent: 'space-between'
+    });
+    const trustSpan = document.createElement('span');
+    trustSpan.textContent = `信任值: ${safeScore}%`;
+    const riskSpan = document.createElement('span');
+    Object.assign(riskSpan.style, { fontWeight: 'bold', color: '#ff4d4f' });
+    riskSpan.textContent = `風險佔比: ${risk}%`;
+    footerRow.appendChild(trustSpan);
+    footerRow.appendChild(riskSpan);
+
+    notify.appendChild(headerRow);
+    notify.appendChild(quoteBox);
+    notify.appendChild(reasonRow);
+    notify.appendChild(barOuter);
+    notify.appendChild(footerRow);
+
+    // 注入動畫 CSS（id 去重，避免重複注入）
     if (!document.getElementById('sentinel-style')) {
         const styleTag = document.createElement('style');
         styleTag.id = 'sentinel-style';
@@ -108,11 +138,11 @@ function showSafetyNotification(reason, score, quotedText) {
 
     document.body.appendChild(notify);
 
-    // 【關鍵修復 3】：確保 6 秒後移除的是「當前這一個」DOM 實例
+    // 【修復 UI-04】確保 6 秒後移除的是「當前這一個」DOM 實例
     setTimeout(() => {
         if (document.body.contains(notify)) {
             notify.style.opacity = '0';
-            notify.style.transition = 'opacity 0.5s ease';
+            notify.style.transition = 'opacity 0.5s';
             setTimeout(() => {
                 if (document.body.contains(notify)) notify.remove();
             }, 500);
