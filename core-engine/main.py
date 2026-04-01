@@ -1,12 +1,12 @@
-from fastapi import FastAPI, Request
+import time
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
-from transformers import pipeline  # 🚀 關鍵：導入 AI 套件
-import uvicorn
+from transformers import pipeline
 
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI()
@@ -14,7 +14,6 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
-# 保持 CORS 設定，讓前端能連線
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,14 +21,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🛠️ 第一次執行會下載模型 (約 200~500MB)，請耐心等候
-# 我們使用多語言 BERT 模型來分析語意偏向
-print("⏳ 正在載入 AI 模型，請稍候...")
-classifier = pipeline(
-    "sentiment-analysis", 
-    model="nlptown/bert-base-multilingual-uncased-sentiment"
-)
-print("✅ AI 模型載入完成！")
+print("⏳ [System] 正在初始化 BERT 模型...")
+start_time = time.time()
+
+classifier = None
+try:
+    classifier = pipeline("sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment")
+    print(f"✅ [System] 模型載入成功！耗時: {time.time() - start_time:.2f} 秒")
+except Exception as e:
+    print(f"❌ [System] 模型載入失敗: {e}")
+
 
 class SecurityRequest(BaseModel):
     content: str = Field(..., max_length=5000)
@@ -37,40 +38,42 @@ class SecurityRequest(BaseModel):
 
 @app.post("/analyze")
 @limiter.limit("30/minute")
-async def analyze(request: Request, body: SecurityRequest):
+async def analyze(request: Request, body: SecurityRequest):  # noqa: ARG001
+    if classifier is None:
+        raise HTTPException(status_code=503, detail="AI 模型未就緒，請稍後再試。")
+
     print(f"🔮 AI 深度分析中: {body.content[:20]}...")
-    
-    # 1. 取得 Top_k=5 的所有星等機率
+
+    # 取得 Top_k=5 的所有星等機率
     raw_results = classifier(body.content, top_k=5)
     prob_dict = {res['label']: res['score'] for res in raw_results}
-    
-    # 2. 定義 0-100 的權重
+
+    # 定義 0-100 的權重
     weights = {
-        "1 star": 0,    # 極度危險
+        "1 star": 0,
         "2 stars": 25,
         "3 stars": 50,
         "4 stars": 75,
-        "5 stars": 100   # 極度安全
+        "5 stars": 100
     }
-    
-    # 3. 計算加權得分並轉為「整數百分比」
+
+    # 計算加權得分並轉為整數百分比
     # Formula: Score = Σ (Prob_i * Weight_i)
     raw_score = sum(prob_dict[label] * weights[label] for label in weights)
-    trust_score_pct = int(round(raw_score)) # 四捨五入成整數
-    
-    # 限制在 5% 到 95% 之間，避免 UI 邊界不好看
+    trust_score_pct = int(round(raw_score))
     trust_score_pct = max(5, min(95, trust_score_pct))
-    
-    # 4. 判斷 Danger 門檻 (建議設在 50% 或 55%)
+
     is_danger = trust_score_pct <= 55
     risk_pct = 100 - trust_score_pct
 
     return {
         "label": "Danger" if is_danger else "Safe",
-        "trust_score": trust_score_pct,  # 這就是你要的整數 %
-        "risk_percentage": risk_pct,     # 危險佔比 %
+        "trust_score": trust_score_pct,
+        "risk_percentage": risk_pct,
         "reason": f"AI 偵測到高達 {risk_pct}% 的負面語意特徵，具備潛在誘導風險。" if is_danger else "語意特徵正常。"
     }
 
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)

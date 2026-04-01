@@ -7,7 +7,7 @@ document.addEventListener('mouseup', function(event) {
 
     let selection = window.getSelection();
     let selectedText = selection.toString().trim();
-    
+
     console.log("📝 選取的文字內容:", selectedText);
 
     if (selectedText.length >= 2) {
@@ -41,8 +41,9 @@ async function analyzeText(text) {
     }
 }
 
+// --- 3. UI 注入函式 ---
 function showSafetyNotification(reason, score, quotedText = "") {
-    // 物理移除舊通知
+    // 【修復 UI-04】物理移除舊通知，確保新通知取代而非重疊
     const oldNotify = document.getElementById('sentinel-notify');
     if (oldNotify) oldNotify.remove();
 
@@ -67,9 +68,7 @@ function showSafetyNotification(reason, score, quotedText = "") {
     });
 
     const headerRow = document.createElement('div');
-    Object.assign(headerRow.style, {
-        display: 'flex', alignItems: 'center', marginBottom: '8px'
-    });
+    Object.assign(headerRow.style, { display: 'flex', alignItems: 'center', marginBottom: '8px' });
     const iconSpan = document.createElement('span');
     iconSpan.style.fontSize = '20px';
     iconSpan.style.marginRight = '10px';
@@ -88,9 +87,7 @@ function showSafetyNotification(reason, score, quotedText = "") {
     quoteBox.textContent = shortText ? `"${shortText}"` : '""';
 
     const reasonRow = document.createElement('div');
-    Object.assign(reasonRow.style, {
-        fontSize: '14px', lineHeight: '1.4', marginBottom: '12px'
-    });
+    Object.assign(reasonRow.style, { fontSize: '14px', lineHeight: '1.4', marginBottom: '12px' });
     const reasonLabel = document.createElement('strong');
     reasonLabel.textContent = '原因：';
     reasonRow.appendChild(reasonLabel);
@@ -103,10 +100,7 @@ function showSafetyNotification(reason, score, quotedText = "") {
     });
     const barInner = document.createElement('div');
     Object.assign(barInner.style, {
-        background: '#ff4d4f',
-        width: `${risk}%`,
-        height: '100%',
-        transition: 'width 0.8s ease'
+        background: '#ff4d4f', width: `${risk}%`, height: '100%', transition: 'width 0.8s ease'
     });
     barOuter.appendChild(barInner);
 
@@ -129,13 +123,29 @@ function showSafetyNotification(reason, score, quotedText = "") {
     notify.appendChild(barOuter);
     notify.appendChild(footerRow);
 
+    // 注入動畫 CSS（id 去重，避免重複注入）
+    if (!document.getElementById('sentinel-style')) {
+        const styleTag = document.createElement('style');
+        styleTag.id = 'sentinel-style';
+        styleTag.textContent = `
+            @keyframes sentinel-slide-in {
+                from { opacity: 0; transform: translateX(50px); }
+                to { opacity: 1; transform: translateX(0); }
+            }
+        `;
+        document.head.appendChild(styleTag);
+    }
+
     document.body.appendChild(notify);
 
+    // 【修復 UI-04】確保 6 秒後移除的是「當前這一個」DOM 實例
     setTimeout(() => {
         if (document.body.contains(notify)) {
             notify.style.opacity = '0';
             notify.style.transition = 'opacity 0.5s';
-            setTimeout(() => notify.remove(), 500);
+            setTimeout(() => {
+                if (document.body.contains(notify)) notify.remove();
+            }, 500);
         }
     }, 6000);
 }
