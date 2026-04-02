@@ -3,16 +3,14 @@ from fastapi.testclient import TestClient
 from api_gateway.main import app
 from common.models import AnalyzeRequest
 
-client = TestClient(app)
-
 def test_health_check():
-    with TestClient(app) as client: # 加入 with
+    with TestClient(app) as client:
         response = client.get("/health")
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
 
 def test_analyze_request_validation():
-    with TestClient(app) as client: # 加入 with
+    with TestClient(app) as client:
         # 測試無效 URL (SSRF 防護)
         payload = {
             "content": "test content",
@@ -20,10 +18,19 @@ def test_analyze_request_validation():
             "timestamp": "2023-10-27T10:00:00Z"
         }
         response = client.post("/analyze", json=payload)
-        assert response.status_code == 422 
+        assert response.status_code == 422
+
+        # 測試無效時間戳記 (Log Injection 防護)
+        payload = {
+            "content": "test content",
+            "url": "https://example.com",
+            "timestamp": "invalid-time\n[LOG INJECTION]"
+        }
+        response = client.post("/analyze", json=payload)
+        assert response.status_code == 422
 
 def test_analyze_request_valid():
-    with TestClient(app) as client: # 加入 with
+    with TestClient(app) as client:
         payload = {
             "content": "Valid content",
             "url": "https://google.com",

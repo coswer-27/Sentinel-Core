@@ -28,7 +28,6 @@ jobs:
 
       - name: Test with pytest
         env:
-          # 重要：告訴 GitHub Actions 根目錄就是 Python 的搜尋路徑
           PYTHONPATH: .
         run: |
-          python -m pytest tests/test_gateway.py
+          python -m pytest tests/ -v
