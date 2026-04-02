@@ -7,13 +7,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - name: Install Linting Tool
-        run: pip install flake8
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # 直接安裝執行測試與 Lint 必備的套件
+          pip install flake8 pytest fastapi httpx slowapi python-dotenv pydantic starlette
+          # 如果你有 requirements.txt，這一行也會幫你裝
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
       - name: Run Lint
-        run: flake8 api_gateway/ service_nlp/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        run: |
+          # 檢查語法錯誤 (E9, F63, F7, F82)
+          flake8 api_gateway/ service_nlp/ --count --select=E9,F63,F7,F82 --show-source --statistics
+
       - name: Test with pytest
-        run: python -m pytest tests/test_gateway.py
+        env:
+          # 重要：告訴 GitHub Actions 根目錄就是 Python 的搜尋路徑
+          PYTHONPATH: .
+        run: |
+          python -m pytest tests/test_gateway.py
