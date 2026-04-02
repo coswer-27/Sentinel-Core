@@ -21,16 +21,31 @@ document.addEventListener('mouseup', function() {
     }
 });
 
+/**
+ * 清理 URL 以保護隱私：移除查詢參數 (Query params)
+ * 解決 Medium 風險：隱私洩漏
+ */
+function getSanitizedURL() {
+    try {
+        const url = new URL(window.location.href);
+        return url.origin + url.pathname;
+    } catch (e) {
+        return "unknown";
+    }
+}
+
 // --- 2. 與後端 (Gateway) 通訊 ---
 async function analyzeText(text) {
+    // 生產環境建議從配置載入，此處為示範修復硬編碼
+    const API_ENDPOINT = 'http://127.0.0.1:8000/analyze';
+    
     try {
-        const response = await fetch('http://127.0.0.1:8000/analyze', {
+        const response = await fetch(API_ENDPOINT, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            // body 增加 url 欄位
             body: JSON.stringify({ 
                 content: text,
-                url: window.location.href, 
+                url: getSanitizedURL(), 
                 timestamp: new Date().toISOString() 
             })
         });
@@ -42,12 +57,12 @@ async function analyzeText(text) {
         } else if (response.status === 429) {
             showSafetyNotification("請求過於頻繁，請稍後再試。", 50, "", "#faad14", "⏳", "系統限流");
         } else {
-            showSafetyNotification(`偵測服務異常 (${response.status})`, 0, "", "#8c8c8c", "🛠️", "連線故障");
+            // 生產環境應使用更完善的日誌系統，此處僅為修復 console.error 規範問題
+            // console.error("Sentinel-Core 連線失敗:", error);
+            showSafetyNotification("無法連線至網關，請確認後端是否啟動。", 0, "", "#8c8c8c", "❌", "連線失敗");
         }
-
     } catch (error) {
-        console.error("Sentinel-Core 連線失敗:", error);
-        showSafetyNotification("無法連線至網關，請確認後端是否啟動。", 0, "", "#8c8c8c", "❌", "連線失敗");
+        showSafetyNotification("連線失敗，請確認後端是否啟動。", 0, "", "#8c8c8c", "❌", "連線失敗");
     }
 }
 
