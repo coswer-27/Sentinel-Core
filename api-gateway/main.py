@@ -2,14 +2,22 @@ import logging
 import os
 import uvicorn
 import httpx
+import sys
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from dotenv import load_dotenv
+
+# 將專案根目錄加入路徑以便導入 common
+sys.path.append(str(Path(__file__).parent.parent))
+from common.models import AnalyzeRequest
+
+load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,6 +26,8 @@ NLP_URL = os.environ.get("NLP_SERVICE_URL", "http://127.0.0.1:8001/analyze")
 
 limiter = Limiter(key_func=get_remote_address)
 
+# 從環境變數載入限流設定
+RATE_LIMIT_STR = os.environ.get("GATEWAY_RATE_LIMIT", "10/minute")
 
 def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     logger.warning("[Gateway] Rate limit exceeded: %s", request.client)
@@ -26,25 +36,11 @@ def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
         content={"detail": f"請求過於頻繁，請稍後再試。限制：{exc.detail}"},
     )
 
-
-class AnalyzeRequest(BaseModel):
-    content: str = Field(..., min_length=1, max_length=5000)
-
-    @field_validator("content")
-    @classmethod
-    def strip_and_check(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("content 不可為空白")
-        return v
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.http_client = httpx.AsyncClient(timeout=10.0)
     yield
     await app.state.http_client.aclose()
-
 
 app = FastAPI(title="Sentinel Gateway", lifespan=lifespan)
 app.state.limiter = limiter
@@ -57,18 +53,18 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
-
 @app.post("/analyze")
-@limiter.limit("10/minute")
+@limiter.limit(RATE_LIMIT_STR)
 async def gateway(request: Request, body: AnalyzeRequest):
+    # 使用參數化日誌紀錄，防止日誌注入
+    logger.info("[Gateway] 收到請求 - 網址: %s, 時間: %s", body.url, body.timestamp)
     try:
         resp = await request.app.state.http_client.post(
-            NLP_URL, json=body.model_dump()
+            NLP_URL, json=body.model_dump(mode='json')
         )
         resp.raise_for_status()
         return resp.json()
@@ -84,7 +80,6 @@ async def gateway(request: Request, body: AnalyzeRequest):
     except Exception as e:
         logger.exception("[Gateway] 未預期錯誤: %s", e)
         raise HTTPException(status_code=500, detail="內部錯誤")
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8000)
