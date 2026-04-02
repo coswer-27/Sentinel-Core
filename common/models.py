@@ -50,4 +50,4 @@ class AnalyzeRequest(BaseModel):
                 raise ValueError("不允許私有網路 URL")
         
         # 防止日誌注入：移除換行符號
-        return url_str.replace("\r", "").replace("\n", "")
+        return HttpUrl(url_str.replace("\r", "").replace("\n", ""))
