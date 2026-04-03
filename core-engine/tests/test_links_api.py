@@ -1,13 +1,13 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 import main
 
 
 def test_analyze_links_returns_results():
-    with patch("main.TextDetector") as mock_td, patch("main.URLDetector") as mock_url:
-        mock_td.return_value = MagicMock()
+    with patch("main.URLDetector") as mock_url:
         mock_inst = MagicMock()
         mock_url.return_value = mock_inst
         mock_inst.analyze_batch = AsyncMock(
@@ -41,8 +41,7 @@ def test_analyze_links_returns_results():
 
 
 def test_analyze_links_handles_exception():
-    with patch("main.TextDetector") as mock_td, patch("main.URLDetector") as mock_url:
-        mock_td.return_value = MagicMock()
+    with patch("main.URLDetector") as mock_url:
         mock_inst = MagicMock()
         mock_url.return_value = mock_inst
         mock_inst.analyze_batch = AsyncMock(side_effect=RuntimeError("network"))
