@@ -88,6 +88,13 @@ function showSafetyNotification(reason, score, quotedText = "", overrideColor = 
     const notify = document.createElement('div');
     notify.id = 'sentinel-notify';
     
+    // --- [Fix 07: 強化 XSS 防禦] ---
+    // 1. 先處理被裁切的引言文字
+    const truncatedText = quotedText.length > 25 ? quotedText.substring(0, 25) + '...' : quotedText;
+    // 2. 將裁切後的文字「完全轉義」
+    const safeShortText = escapeHTML(truncatedText);
+    // 3. 同時確保原因 (reason) 也要轉義，防止後端回傳值包含惡意代碼
+    const safeReason = escapeHTML(reason);
     // 這裡我們直接把整個結構（含叉叉）寫進 innerHTML
     const shortText = quotedText.length > 25 ? quotedText.substring(0, 25) + '...' : quotedText;
     
@@ -98,11 +105,14 @@ function showSafetyNotification(reason, score, quotedText = "", overrideColor = 
             <span style="font-size:22px; margin-right:10px;">${finalIcon}</span>
             <strong style="font-size:16px; color:${finalColor};">${escapeHTML(finalTitle)}</strong>
         </div>
-        ${shortText ? `
+
+        ${safeShortText ? `
         <div style="font-style:italic; color:#666; font-size:12px; background:#f8f9fa; padding:10px; border-radius:6px; margin-bottom:12px; border-left:3px solid #ddd;">
-            "${escapeHTML(shortText)}"
+            "${safeShortText}"
         </div>` : ''}
-        <div style="font-size:14px; line-height:1.5; margin-bottom:15px;">${escapeHTML(reason)}</div>
+
+        <div style="font-size:14px; line-height:1.5; margin-bottom:15px;">${safeReason}</div>
+
         <div style="background:#eee; height:8px; border-radius:4px; overflow:hidden;">
             <div id="sentinel-bar" style="background:${finalColor}; width:0%; height:100%; transition:width 1.2s cubic-bezier(0.1, 0.7, 0.1, 1);"></div>
         </div>
