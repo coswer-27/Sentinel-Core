@@ -4,10 +4,16 @@ import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
-from detectors.bert_engine import BertDetector
 
-# 將專案根目錄加入路徑以便導入 common
-sys.path.append(str(Path(__file__).parent.parent))
+# 將當前目錄與專案根目錄加入路徑，確保導入正常
+current_dir = Path(__file__).parent
+root_dir = current_dir.parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
+
+from detectors.bert_engine import BertDetector
 from common.models import AnalyzeRequest
 
 logging.basicConfig(level=logging.INFO)

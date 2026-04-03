@@ -3,20 +3,26 @@ import os
 import uvicorn
 import httpx
 import sys
-from .rules_engine import engine
+from pathlib import Path
+
+# 將當前目錄與專案根目錄加入路徑
+current_dir = Path(__file__).parent
+root_dir = current_dir.parent
+if str(current_dir) not in sys.path:
+    sys.path.insert(0, str(current_dir))
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
+
+from rules_engine import engine
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pathlib import Path
+from common.models import AnalyzeRequest
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-
-# 將專案根目錄加入路徑以便導入 common
-sys.path.append(str(Path(__file__).parent.parent))
-from common.models import AnalyzeRequest
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
