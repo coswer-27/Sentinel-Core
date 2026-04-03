@@ -1,7 +1,7 @@
 import json
 import pytest
 import httpx
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
 from api_gateway.main import app, _rate_limit_exceeded_handler
 from api_gateway.rules_engine import engine  # 注意前面的那個「.」
@@ -191,3 +191,61 @@ def test_rate_limit_handler_returns_429_with_detail():
     body = json.loads(response.body)
     assert "detail" in body
     assert "10/minute" in body["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Stats endpoint
+# ---------------------------------------------------------------------------
+
+def test_get_stats_success(gateway_client):
+    # Mock aiosqlite.connect 以模擬資料庫回傳
+    mock_row = {"total": 10, "avg_score": 85.5}
+    
+    with patch("aiosqlite.connect") as mock_connect:
+        mock_db = AsyncMock()
+        mock_connect.return_value.__aenter__.return_value = mock_db
+        
+        mock_cursor = AsyncMock()
+        # 修正：db.execute 是一個協程，它直接回傳 cursor
+        mock_db.execute.return_value = mock_cursor
+        
+        # cursor 是一個非同步上下文管理器
+        mock_cursor.__aenter__.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = mock_row
+        
+        response = gateway_client.get("/stats")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 10
+        assert data["avg_score"] == 85.5
+
+
+def test_get_stats_empty_db(gateway_client):
+    # 模擬資料庫為空的情況
+    mock_row = {"total": 0, "avg_score": None}
+    
+    with patch("aiosqlite.connect") as mock_connect:
+        mock_db = AsyncMock()
+        mock_connect.return_value.__aenter__.return_value = mock_db
+        
+        mock_cursor = AsyncMock()
+        # 修正：db.execute 是一個協程，它直接回傳 cursor
+        mock_db.execute.return_value = mock_cursor
+        
+        # cursor 是一個非同步上下文管理器
+        mock_cursor.__aenter__.return_value = mock_cursor
+        mock_cursor.fetchone.return_value = mock_row
+        
+        response = gateway_client.get("/stats")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 0
+        assert data["avg_score"] == 0
+
+
+def test_get_stats_db_error(gateway_client):
+    # 模擬資料庫連線失敗
+    with patch("aiosqlite.connect", side_effect=Exception("DB Error")):
+        response = gateway_client.get("/stats")
+        assert response.status_code == 500
+        assert response.json()["detail"] == "無法讀取統計數據"
