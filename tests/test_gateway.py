@@ -3,6 +3,7 @@ import pytest
 import httpx
 from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
+import api_gateway.main as gateway_main
 from api_gateway.main import app, _rate_limit_exceeded_handler
 
 
@@ -83,7 +84,9 @@ def test_analyze_ssrf_all_private_ranges_blocked(gateway_client, private_url):
 # Upstream error handling
 # ---------------------------------------------------------------------------
 
-def test_analyze_no_nlp_service_returns_503_or_502():
+def test_analyze_no_nlp_service_returns_503_or_502(monkeypatch):
+    # 指向未監聽埠，避免本機已啟動 NLP 時誤得 200
+    monkeypatch.setattr(gateway_main, "NLP_URL", "http://127.0.0.1:59999/analyze")
     with TestClient(app) as client:
         payload = {
             "content": "Valid content",
