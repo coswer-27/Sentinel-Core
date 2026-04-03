@@ -14,6 +14,6 @@ jobs:
       - name: JavaScript Syntax Check
         run: |
           echo "Checking JavaScript syntax..."
-          for f in browser-ext/*.js; do
+          for f in browser_ext/*.js; do
             node --check "$f" && echo "✅ $f OK" || exit 1
           done
