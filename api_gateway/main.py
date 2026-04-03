@@ -3,15 +3,16 @@ import os
 import uvicorn
 import httpx
 import sys
-from pathlib import Path
+from .rules_engine import engine
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pathlib import Path
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from dotenv import load_dotenv
 
 # 將專案根目錄加入路徑以便導入 common
 sys.path.append(str(Path(__file__).parent.parent))
@@ -60,8 +61,22 @@ async def health():
 @app.post("/analyze")
 @limiter.limit(RATE_LIMIT_STR)
 async def gateway(request: Request, body: AnalyzeRequest):
-    # 使用參數化日誌紀錄，防止日誌注入
+    # v2.1 Context Log
     logger.info("[Gateway] 收到請求 - 網址: %s, 時間: %s", body.url, body.timestamp)
+
+    # --- v2.2 規則引擎攔截 ---
+    # 這裡將 body.url 轉為 str，避免 Regex 比對失敗
+    rule_result = engine.check(body.content, str(body.url) if body.url else None)
+    
+    if rule_result.get("hit"):
+        logger.info("[Gateway] 規則攔截成功: %s", rule_result["reason"])
+        return {
+            "trust_score": rule_result["trust_score"],
+            "label": "Danger",
+            "reason": f"[快速攔截] {rule_result['reason']}"
+        }
+
+    # --- 若規則未命中，才走原本的 NLP 流程 ---
     try:
         resp = await request.app.state.http_client.post(
             NLP_URL, json=body.model_dump(mode='json')
