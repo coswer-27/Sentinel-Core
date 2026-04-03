@@ -1,13 +1,28 @@
+import importlib.util
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-import main
+_root = Path(__file__).resolve().parent.parent
 
 
-def test_analyze_links_returns_results():
-    with patch("main.URLDetector") as mock_url:
+@pytest.fixture(scope="session")
+def link_main():
+    """延遲載入，避免覆寫 sys.modules['main']（service_nlp 測試需使用同名模組）。"""
+    spec = importlib.util.spec_from_file_location(
+        "sentinel_link_scanner_main",
+        _root / "service_link_scanner" / "main.py",
+    )
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_analyze_links_returns_results(link_main):
+    with patch.object(link_main, "URLDetector") as mock_url:
         mock_inst = MagicMock()
         mock_url.return_value = mock_inst
         mock_inst.analyze_batch = AsyncMock(
@@ -27,7 +42,7 @@ def test_analyze_links_returns_results():
             ]
         )
 
-        with TestClient(main.app) as client:
+        with TestClient(link_main.app) as client:
             response = client.post(
                 "/analyze/links",
                 json={"urls": ["https://a.test/", "https://b.test/"]},
@@ -40,13 +55,13 @@ def test_analyze_links_returns_results():
         assert data["results"][1]["label"] == "Suspicious"
 
 
-def test_analyze_links_handles_exception():
-    with patch("main.URLDetector") as mock_url:
+def test_analyze_links_handles_exception(link_main):
+    with patch.object(link_main, "URLDetector") as mock_url:
         mock_inst = MagicMock()
         mock_url.return_value = mock_inst
         mock_inst.analyze_batch = AsyncMock(side_effect=RuntimeError("network"))
 
-        with TestClient(main.app) as client:
+        with TestClient(link_main.app) as client:
             response = client.post(
                 "/analyze/links",
                 json={"urls": ["https://broken.test/"]},

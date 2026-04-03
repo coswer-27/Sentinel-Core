@@ -84,8 +84,9 @@ async def gateway(request: Request, body: AnalyzeRequest):
         raise HTTPException(status_code=500, detail="內部錯誤")
 
 @app.post("/analyze/links")
-@limiter.limit("5/minute")
+@limiter.limit("30/minute")
 async def gateway_analyze_links(request: Request, body: BatchUrlRequest):
+    logger.info("[Gateway] 收到連結掃描請求 - 共 %d 個 URL", len(body.urls))
     try:
         resp = await request.app.state.http_client.post(
             URL_SERVICE_URL, json=body.model_dump()

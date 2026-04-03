@@ -1,10 +1,10 @@
 import logging
-import os
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -12,21 +12,27 @@ from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 import uvicorn
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
-from detectors import URLDetector
-from schemas import BatchUrlRequest, BatchUrlResponse, UrlScanResult
+_repo_root = Path(__file__).resolve().parent.parent
+_link_root = Path(__file__).resolve().parent
+sys.path.insert(0, str(_repo_root))
+sys.path.insert(0, str(_link_root))
+
+from common.models import BatchUrlRequest
+
+from url_scan import URLDetector
+from schemas import BatchUrlResponse, UrlScanResult
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://127.0.0.1,null").split(",")
 
 limiter = Limiter(key_func=get_remote_address)
 
 
 def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
-    logger.warning("[URL Service] Rate limit exceeded: %s", request.client)
+    logger.warning("[Sentinel] Rate limit exceeded: %s", request.client)
     return JSONResponse(
         status_code=429,
         content={"detail": f"請求過於頻繁，請稍後再試。限制：{exc.detail}"},
@@ -39,22 +45,15 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Sentinel URL Scanner Service", lifespan=lifespan)
+app = FastAPI(title="Sentinel Link Scanner", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
-)
-
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "url-scanner"}
+    return {"status": "ok", "service": "service_link_scanner"}
 
 
 @app.post("/analyze/links", response_model=BatchUrlResponse)
@@ -64,13 +63,13 @@ async def analyze_links(body: BatchUrlRequest, request: Request):
     try:
         rows = await url_detector.analyze_batch(body.urls)
     except Exception as e:
-        logger.error("[URL Service] analyze_batch 失敗: %s", e)
+        logger.error("[Sentinel] analyze_batch 失敗: %s", e, exc_info=True)
         rows = [
             {
                 "final_url": u,
                 "trust_score": 50,
                 "label": "Suspicious",
-                "reason": f"無法分析此連結：{str(e)}",
+                "reason": "服務暫時無法分析此連結，請稍後再試",
             }
             for u in body.urls
         ]

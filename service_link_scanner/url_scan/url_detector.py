@@ -1,10 +1,11 @@
 import asyncio
+import logging
 import os
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlparse, urlsplit, urlunsplit
+
+logger = logging.getLogger(__name__)
 
 import httpx
-
-from .base import BaseDetector
 
 SUSPICIOUS_TLDS = {".top", ".xyz", ".tk", ".pw", ".gq", ".cf", ".ml"}
 MAX_REDIRECTS = 5
@@ -27,7 +28,7 @@ def _normalize_url_for_compare(u: str) -> str:
         return u.strip()
 
 
-class URLDetector(BaseDetector):
+class URLDetector:
     async def get_final_url(self, url: str) -> tuple[str, int]:
         """
         追蹤 redirect，回傳 (final_url, hop_count)
@@ -88,6 +89,7 @@ class URLDetector(BaseDetector):
                         json=body,
                     )
                     if resp.status_code != 200:
+                        logger.warning("[GSB] 非預期狀態碼 %s，略過此批次", resp.status_code)
                         continue
                     data = resp.json()
                     for m in data.get("matches") or []:
@@ -105,16 +107,15 @@ class URLDetector(BaseDetector):
         original: str,
         final_url: str,
         malicious_raw: set[str],
+        malicious_normalized: set[str],
     ) -> bool:
         if not malicious_raw:
             return False
         for cand in (original, final_url):
             if cand in malicious_raw:
                 return True
-            nc = _normalize_url_for_compare(cand)
-            for mu in malicious_raw:
-                if _normalize_url_for_compare(mu) == nc:
-                    return True
+            if _normalize_url_for_compare(cand) in malicious_normalized:
+                return True
         return False
 
     def heuristic_check(self, url: str) -> tuple[bool, str]:
@@ -124,8 +125,6 @@ class URLDetector(BaseDetector):
         - 可疑 TLD: 符合 SUSPICIOUS_TLDS
         回傳 (is_suspicious, reason)
         """
-        from urllib.parse import urlparse
-
         try:
             parsed = urlparse(url)
             host = (parsed.netloc or parsed.path or "").lower()
@@ -153,9 +152,10 @@ class URLDetector(BaseDetector):
         final_url: str,
         hops: int,
         malicious_set: set[str],
+        malicious_normalized: set[str],
     ) -> dict:
         is_malicious = self._is_url_flagged_by_gsb(
-            original, final_url, malicious_set
+            original, final_url, malicious_set, malicious_normalized
         )
         is_suspicious, heuristic_reason = self.heuristic_check(final_url)
 
@@ -219,9 +219,10 @@ class URLDetector(BaseDetector):
         malicious_set: set[str] = set()
         if to_check:
             malicious_set = await self.check_google_safe_browsing_batch(to_check)
+        malicious_normalized = {_normalize_url_for_compare(u) for u in malicious_set}
 
         return [
-            self._row_from_scan(orig, fin, hops, malicious_set)
+            self._row_from_scan(orig, fin, hops, malicious_set, malicious_normalized)
             for orig, fin, hops in pairs
         ]
 
@@ -229,7 +230,3 @@ class URLDetector(BaseDetector):
         """單一 URL 完整分析，回傳 UrlScanResult 相容的 dict"""
         rows = await self.analyze_batch([url])
         return rows[0]
-
-    def analyze(self, content: str) -> dict:
-        """BaseDetector 介面相容（同步包裝，供測試用）"""
-        return asyncio.run(self.analyze_url(content))

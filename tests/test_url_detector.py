@@ -1,4 +1,9 @@
-from detectors.url_detector import URLDetector
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "service_link_scanner"))
+
+from url_scan.url_detector import URLDetector  # noqa: E402
 
 
 def test_heuristic_punycode():
