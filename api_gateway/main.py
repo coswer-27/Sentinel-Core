@@ -15,10 +15,19 @@ if str(root_dir) not in sys.path:
 
 # 導入資料庫邏輯 (假設 database.py 與 main.py 在同一個資料夾)
 from database import init_db, log_scan
+
+async def safe_log_scan(*args, **kwargs):
+    """
+    封裝 log_scan 並加上異常處理，確保資料庫錯誤不會影響 API 回應
+    """
+    try:
+        await log_scan(*args, **kwargs)
+    except Exception as e:
+        logger.error("[Gateway] 背景記錄日誌失敗: %s", e)
 from rules_engine import engine
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from common.models import AnalyzeRequest
@@ -73,7 +82,7 @@ async def health():
 
 @app.post("/analyze")
 @limiter.limit(RATE_LIMIT_STR)
-async def gateway(request: Request, body: AnalyzeRequest):
+async def gateway(request: Request, body: AnalyzeRequest, background_tasks: BackgroundTasks):
     logger.info("[Gateway] 收到請求 - 網址: %s, 時間: %s", body.url, body.timestamp)
 
     # --- v2.2 規則引擎攔截 ---
@@ -87,8 +96,9 @@ async def gateway(request: Request, body: AnalyzeRequest):
             "reason": reason_str
         }
         
-        # --- v2.3 紀錄規則攔截日誌 ---
-        await log_scan(
+        # --- v2.3 紀錄規則攔截日誌 (改為背景任務) ---
+        background_tasks.add_task(
+            safe_log_scan,
             content=body.content,
             url=str(body.url) if body.url else None,
             score=res["trust_score"],
@@ -97,7 +107,7 @@ async def gateway(request: Request, body: AnalyzeRequest):
             ts=body.timestamp
         )
         
-        logger.info("[Gateway] 規則攔截成功並已存入資料庫")
+        logger.info("[Gateway] 規則攔截成功並已加入背景記錄任務")
         return res
 
     # --- 若規則未命中，走原本的 NLP 流程 ---
@@ -108,8 +118,9 @@ async def gateway(request: Request, body: AnalyzeRequest):
         resp.raise_for_status()
         nlp_res = resp.json()
 
-        # --- v2.3 紀錄 NLP 分析結果日誌 ---
-        await log_scan(
+        # --- v2.3 紀錄 NLP 分析結果日誌 (改為背景任務) ---
+        background_tasks.add_task(
+            safe_log_scan,
             content=body.content,
             url=str(body.url) if body.url else None,
             score=nlp_res["trust_score"],
@@ -144,9 +155,10 @@ async def get_stats():
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute(
+            cursor = await db.execute(
                 "SELECT COUNT(*) as total, AVG(trust_score) as avg_score FROM scan_logs"
-            ) as cursor:
+            )
+            async with cursor:
                 row = await cursor.fetchone()
                 # 處理資料庫為空的情況，避免回傳 null
                 result = dict(row) if row else {"total": 0, "avg_score": 0}

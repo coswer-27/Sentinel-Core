@@ -6,3 +6,5 @@ __pycache__/
 .vscode/
 models/*.pth
 models/*.bin
+*.db
+sentinel_logs.db
