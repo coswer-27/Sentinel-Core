@@ -4,6 +4,14 @@ function escapeHTML(str) {
     return div.innerHTML;
 }
 
+function truncateUrl(url, max = 50) {
+    try {
+        return url.length > max ? url.slice(0, max) + "\u2026" : url;
+    } catch {
+        return url;
+    }
+}
+
 function getSanitizedURL() {
     try {
         const url = new URL(window.location.href);
@@ -84,7 +92,7 @@ function getOrCreateNotificationStack() {
             right: "24px",
             zIndex: "2147483647",
             display: "flex",
-            flexDirection: "column-reverse",
+            flexDirection: "column",
             gap: "10px",
             alignItems: "flex-end",
             pointerEvents: "none",
@@ -299,11 +307,13 @@ function getOrCreateLinkToast() {
         el.setAttribute("role", "status");
         Object.assign(el.style, {
             ...SC_TOAST_BASE_STYLE,
+            width: "320px",
             pointerEvents: "none",
             display: "none",
             opacity: "0",
             transition: "opacity 0.15s ease",
-            borderLeft: "4px solid #4fc3f7",
+            borderLeft: "6px solid #4fc3f7",
+            order: "9999",
         });
         getOrCreateNotificationStack().appendChild(el);
     }
@@ -328,8 +338,12 @@ function positionLinkToast(targetEl) {
     }
 
     const status = targetEl.getAttribute("data-sc-status") || "default";
-    toast.style.borderLeft = `4px solid ${SC_STATUS_COLORS[status] ?? SC_STATUS_COLORS.default}`;
-    toast.textContent = text;
+    const color = SC_STATUS_COLORS[status] ?? SC_STATUS_COLORS.default;
+    toast.style.borderLeft = `4px solid ${color}`;
+    const url = targetEl.href || "";
+    const safeText = escapeHTML(text);
+    const safeUrl = url ? escapeHTML(truncateUrl(url)) : "";
+    toast.innerHTML = `<div>${safeText}</div>${safeUrl ? `<div style="font-size:12px;color:#888;margin-top:4px;word-break:break-all;">${safeUrl}</div>` : ""}`;
     toast.style.display = "block";
     requestAnimationFrame(() => { toast.style.opacity = "1"; });
 }
@@ -339,11 +353,13 @@ function showLinkToast(targetEl) {
     positionLinkToast(targetEl);
 }
 
-function showLinkToastDirect(text, borderColor = SC_STATUS_COLORS.default) {
+function showLinkToastDirect(text, borderColor = SC_STATUS_COLORS.default, url = "") {
     const toast = getOrCreateLinkToast();
     scLinkToastActiveTarget = null;
     toast.style.borderLeft = `4px solid ${borderColor}`;
-    toast.textContent = text;
+    const safeText = escapeHTML(text);
+    const safeUrl = url ? escapeHTML(truncateUrl(url)) : "";
+    toast.innerHTML = `<div>${safeText}</div>${safeUrl ? `<div style="font-size:12px;color:#888;margin-top:4px;word-break:break-all;">${safeUrl}</div>` : ""}`;
     toast.style.display = "block";
     requestAnimationFrame(() => { toast.style.opacity = "1"; });
 }
@@ -463,7 +479,7 @@ async function scanOnHover(anchorEl) {
     pendingScans.add(href);
     scannedUrls.add(href);
 
-    showLinkToastDirect("🔍 Sentinel 掃描中...");
+    showLinkToastDirect("🔍 Sentinel 掃描中...", SC_STATUS_COLORS.default, href);
 
     try {
         const data = await sentinelBackendFetch(`${BACKEND_URL}/analyze/links`, {
