@@ -68,40 +68,32 @@ async function analyzeText(text) {
 
 // --- 3. UI 注入與動態主題 ---
 function showSafetyNotification(reason, score, quotedText = "", overrideColor = null, overrideIcon = null, overrideTitle = null) {
-    // 移除舊通知
     const oldNotify = document.getElementById('sentinel-notify');
     if (oldNotify) oldNotify.remove();
 
-    // 計算數據（修復：clamp 至 0-100 防止溢出）
     const s = Math.max(0, Math.min(100, Math.round(Number(score) || 0)));
     const risk = 100 - s;
 
-    // --- [v1.2 主題引擎] ---
-    let theme = { color: '#ff4d4f', icon: '🚨', title: '高風險內容', time: 8000 }; // 預設紅色 (Danger)
+    let theme = { color: '#ff4d4f', icon: '🚨', title: '高風險內容', time: 8000 };
     if (s > 70) {
-        theme = { color: '#52c41a', icon: '✅', title: '內容安全', time: 4000 }; // 綠色 (Safe)
+        theme = { color: '#52c41a', icon: '✅', title: '內容安全', time: 4000 };
     } else if (s >= 40) {
-        theme = { color: '#faad14', icon: '⚠️', title: '疑似風險', time: 6000 }; // 橘色 (Warning)
+        theme = { color: '#faad14', icon: '⚠️', title: '疑似風險', time: 6000 };
     }
 
     const finalColor = overrideColor || theme.color;
     const finalIcon = overrideIcon || theme.icon;
     const finalTitle = overrideTitle || theme.title;
 
-    // 建立通知容器
     const notify = document.createElement('div');
     notify.id = 'sentinel-notify';
-    Object.assign(notify.style, {
-        position: 'fixed', bottom: '30px', right: '30px', width: '320px',
-        backgroundColor: '#ffffff', borderLeft: `8px solid ${finalColor}`,
-        boxShadow: '0 12px 32px rgba(0,0,0,0.15)', padding: '20px', borderRadius: '12px',
-        zIndex: '2147483647', fontFamily: "system-ui, -apple-system, sans-serif",
-        animation: 'sentinel-slide-in 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28)'
-    });
-
-    // 修復 XSS：使用 escapeHTML 處理所有來自外部的字串
+    
+    // 這裡我們直接把整個結構（含叉叉）寫進 innerHTML
     const shortText = quotedText.length > 25 ? quotedText.substring(0, 25) + '...' : quotedText;
+    
     notify.innerHTML = `
+        <div id="sentinel-close-x" style="position:absolute; top:12px; right:15px; cursor:pointer; font-size:22px; color:#aaa; line-height:1; z-index:100; transition:color 0.2s;">&times;</div>
+        
         <div style="display:flex; align-items:center; margin-bottom:10px;">
             <span style="font-size:22px; margin-right:10px;">${finalIcon}</span>
             <strong style="font-size:16px; color:${finalColor};">${escapeHTML(finalTitle)}</strong>
@@ -119,28 +111,34 @@ function showSafetyNotification(reason, score, quotedText = "", overrideColor = 
         </div>
     `;
 
-    // 注入動畫樣式
-    if (!document.getElementById('sentinel-style')) {
-        const style = document.createElement('style');
-        style.id = 'sentinel-style';
-        style.innerHTML = `
-            @keyframes sentinel-slide-in {
-                from { opacity:0; transform:translateX(50px); }
-                to { opacity:1; transform:translateX(0); }
-            }
-        `;
-        document.head.appendChild(style);
-    }
+    // 設定外框樣式
+    Object.assign(notify.style, {
+        position: 'fixed', bottom: '30px', right: '30px', width: '320px',
+        backgroundColor: '#ffffff', borderLeft: `8px solid ${finalColor}`,
+        boxShadow: '0 12px 32px rgba(0,0,0,0.15)', padding: '20px', borderRadius: '12px',
+        zIndex: '2147483647', fontFamily: "system-ui, -apple-system, sans-serif",
+        animation: 'sentinel-slide-in 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28)'
+    });
 
     document.body.appendChild(notify);
 
-    // 啟動進度條動畫
+    // 🚀 重點：在 appendChild 之後，才去抓那個 ID 來綁定點擊事件
+    const xBtn = document.getElementById('sentinel-close-x');
+    if (xBtn) {
+        xBtn.onclick = (e) => {
+            e.stopPropagation(); // 防止事件冒泡
+            notify.remove();
+        };
+        xBtn.onmouseover = () => { xBtn.style.color = finalColor; };
+        xBtn.onmouseout = () => { xBtn.style.color = '#aaa'; };
+    }
+
+    // 進度條與自動退場邏輯保持不變...
     setTimeout(() => {
         const bar = document.getElementById('sentinel-bar');
         if (bar) bar.style.width = `${risk}%`;
     }, 100);
 
-    // 自動退場
     setTimeout(() => {
         if (document.body.contains(notify)) {
             notify.style.opacity = '0';
