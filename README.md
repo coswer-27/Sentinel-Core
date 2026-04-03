@@ -19,6 +19,7 @@ Sentinel-Core 是一個基於微服務架構的資安防護工具，結合 **BER
 1. **API Gateway (Port 8000)**: 入口網關，負責流量限制 (Rate Limiting)、SSRF 防護、請求轉發與規則攔截。
 2. **NLP Service (Port 8001)**: AI 運算單元，執行微調後的 BERT 語意分析模型推論。
 3. **Chrome Extension**: 前端偵測插件，實作即時文字選取監聽與三色動態預警 UI。
+4. **SQLite Database**: 透過 `aiosqlite` 非同步紀錄所有偵測日誌與統計數據。
 
 ---
 
@@ -28,10 +29,17 @@ Sentinel-Core 是一個基於微服務架構的資安防護工具，結合 **BER
 - **XSS 跨站腳本防護**: 透過 `escapeHTML` 轉義機制，防止惡意選取內容或 API 回傳值造成代碼注入。
 - **日誌注入防護 (Log Injection)**: 對 URL 與時間戳記進行嚴格字元過濾，確保系統紀錄不被惡意竄改。
 - **流量限制 (Rate Limiting)**: 導入 `slowapi` 實作每 IP 每分鐘限制 10 次請求，防止服務遭濫用。
+- **單點故障隔離 (Fault Isolation)**：資料庫紀錄由 FastAPI BackgroundTasks 異步處理，即便資料庫發生 Locked 或連線異常，核心分析功能依然保持穩定，不影響使用者體驗。
 
 ---
 
 ## 📜 版本紀錄 (Changelog)
+#### **v2.3 - 數據持久化與背景任務**
+* **[資料庫] 異步日誌系統**：導入 `aiosqlite` 實作非同步掃描紀錄，確保偵測數據持久化。
+* **[穩定性] 背景任務處理**：使用 FastAPI `BackgroundTasks` 執行資料庫寫入，確保 I/O 延遲不影響 API 回應速度。
+* **[監控] 統計接口 (/stats)**：新增即時數據分析 API，支援回傳總掃描次數與平均信任得分。
+* **[測試] 健壯性提升**：補齊資料庫邊界測試，並實作全域 Mock 邏輯防止測試污染真實數據。
+* **[資安] Git 安全強化**：完善 `.gitignore` 規範，杜絕 `.db` 與 `.env` 敏感檔案上傳風險。
 
 #### **v2.2 - 混合偵測與自動化測試**
 * **[核心] 規則引擎整合**：實作 `RulesEngine`，支援 Regex 關鍵字與精確網域黑名單比對。
@@ -72,7 +80,7 @@ Sentinel-Core 是一個基於微服務架構的資安防護工具，結合 **BER
 請確保您的開發環境已安裝 **Python 3.9+**。在專案根目錄執行以下指令安裝所有必要套件：
 
 ```powershell
-pip install fastapi uvicorn transformers torch httpx slowapi pydantic python-dotenv
+pip install -r requirements.txt
 ```
 
 > **備註**：由於 BERT 模型較大，初次啟動 `service_nlp` 時系統會自動下載預訓練權重（約 600MB），請保持網路暢通。
@@ -101,6 +109,7 @@ python main.py
 * **檢查點**：出現 `Uvicorn running on http://127.0.0.1:8000`。
 * **預設位址**：`http://127.0.0.1:8000`
 
+> **備註**：首次啟動 `api_gateway` 時，系統會自動在根目錄建立 `sentinel_logs.db` 檔案。該檔案已列入 `.gitignore` 以確保數據隱私。
 ---
 
 #### 3. 執行自動化測試 (環境驗證)
@@ -134,17 +143,20 @@ python -m pytest tests/ -v
 ---
 
 ## 📡 API 規格
- - Endpoint: `POST /analyze`
- - Request Body:  
- ```
- {"content": "待檢測的文字內容"}
- ```
- - Response:
-```
+
+### 1. 內容分析接口
+- **Endpoint**: `POST /analyze`
+- **功能**: 執行規則攔截與 AI 語意辨識。
+- **Rate Limit**: 30 請求/分鐘 (v2.4 調整)。
+
+### 2. 統計數據接口 (New!)
+- **Endpoint**: `GET /stats`
+- **功能**: 獲取系統累計偵測數據。
+- **Response**:
+```json
 {
-  "trust_score": 85,
-  "label": "Safe",
-  "reason": "AI 分析信任度為 85%"
+  "total": 42,
+  "avg_score": 75.5
 }
 ```
 ---
