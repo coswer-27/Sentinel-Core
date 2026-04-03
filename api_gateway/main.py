@@ -71,8 +71,7 @@ async def gateway(request: Request, body: AnalyzeRequest):
     logger.info("[Gateway] 收到請求 - 網址: %s, 時間: %s", body.url, body.timestamp)
 
     # --- v2.2 規則引擎攔截 ---
-    # 這裡將 body.url 轉為 str，避免 Regex 比對失敗
-    rule_result = engine.check(body.content, str(body.url) if body.url else None)
+    rule_result = engine.check(body.content, body.url)
     
     if rule_result.get("hit"):
         logger.info("[Gateway] 規則攔截成功: %s", rule_result["reason"])
