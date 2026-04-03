@@ -3,6 +3,8 @@ from typing import List, Optional
 from datetime import datetime
 import re
 
+from .validators import assert_public_http_url
+
 class AnalyzeRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
     url: Optional[HttpUrl] = None
@@ -62,4 +64,5 @@ class BatchUrlRequest(BaseModel):
         for url in v:
             if not url or not url.strip():
                 raise ValueError("urls 中不可包含空字串")
+            assert_public_http_url(url.strip())
         return v
