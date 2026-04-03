@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 import api_gateway.main as gateway_main
 from api_gateway.main import app, _rate_limit_exceeded_handler
-
+from api_gateway.rules_engine import engine  # 注意前面的那個「.」
 
 # ---------------------------------------------------------------------------
 # Health check
@@ -64,6 +64,16 @@ def test_analyze_missing_content_returns_422():
         assert client.post("/analyze", json={"url": "https://example.com"}).status_code == 422
 
 
+def test_analyze_rule_engine_intercepts_line_scam(gateway_client):
+    payload = {"content": "趕快加我 LINE 領取飆股資訊！"}
+    response = gateway_client.post("/analyze", json=payload)
+    
+    assert response.status_code == 200
+    data = response.json()
+    assert "[快速攔截]" in data["reason"]
+    assert data["trust_score"] == 15
+
+
 @pytest.mark.parametrize("private_url", [
     "http://127.0.0.1/admin",
     "http://127.0.0.2/",
@@ -84,17 +94,21 @@ def test_analyze_ssrf_all_private_ranges_blocked(gateway_client, private_url):
 # Upstream error handling
 # ---------------------------------------------------------------------------
 
-def test_analyze_no_nlp_service_returns_503_or_502(monkeypatch):
-    # 指向未監聽埠，避免本機已啟動 NLP 時誤得 200
-    monkeypatch.setattr(gateway_main, "NLP_URL", "http://127.0.0.1:59999/analyze")
-    with TestClient(app) as client:
-        payload = {
-            "content": "Valid content",
-            "url": "https://google.com",
-            "timestamp": "2023-10-27T10:00:00Z",
-        }
-        response = client.post("/analyze", json=payload)
-        assert response.status_code in [502, 503]
+def test_analyze_no_nlp_service_returns_503_or_502(gateway_client):
+    # 使用 AsyncMock 強迫 http_client 拋出連線錯誤
+    gateway_client.app.state.http_client.post = AsyncMock(
+        side_effect=httpx.ConnectError("Connection refused")
+    )
+    
+    payload = {
+        "content": "Valid content",
+        "url": "https://google.com",
+        "timestamp": "2023-10-27T10:00:00Z",
+    }
+    response = gateway_client.post("/analyze", json=payload)
+    
+    # 確保當連線失敗時，Gateway 會回傳我們定義好的錯誤碼
+    assert response.status_code in [502, 503]
 
 
 def test_analyze_timeout_returns_504(gateway_client):

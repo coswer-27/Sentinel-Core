@@ -39,7 +39,7 @@ class AnalyzeRequest(BaseModel):
         if v is None:
             return None
         url_str = str(v)
-        # 簡單的 SSRF 防護：禁止私有 IP (這只是基本範例，生產環境建議用更嚴格的檢查)
+        # 簡單的 SSRF 防護：禁止私有 IP
         private_patterns = [
             r"^https?://localhost",
             r"^https?://127\.",
@@ -51,8 +51,8 @@ class AnalyzeRequest(BaseModel):
             if re.match(pattern, url_str):
                 raise ValueError("不允許私有網路 URL")
         
-        # 防止日誌注入：移除換行符號
-        return HttpUrl(url_str.replace("\r", "").replace("\n", ""))
+        # 防止日誌注入：移除換行符號並回傳字串
+        return url_str.replace("\r", "").replace("\n", "")
 
 
 class BatchUrlRequest(BaseModel):
