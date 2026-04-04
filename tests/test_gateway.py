@@ -3,6 +3,7 @@ import pytest
 import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi.testclient import TestClient
+import api_gateway.main as gateway_main
 from api_gateway.main import app, _rate_limit_exceeded_handler
 from api_gateway.rules_engine import engine  # 注意前面的那個「.」
 

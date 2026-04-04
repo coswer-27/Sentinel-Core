@@ -30,10 +30,11 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from common.models import AnalyzeRequest
+from common.models import AnalyzeRequest, BatchUrlRequest
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
 
@@ -41,6 +42,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 NLP_URL = os.environ.get("NLP_SERVICE_URL", "http://127.0.0.1:8001/analyze")
+URL_SERVICE_URL = os.environ.get("URL_SERVICE_URL", "http://127.0.0.1:8002/analyze/links")
 
 limiter = Limiter(key_func=get_remote_address)
 # 修改後 (Fix 08)
@@ -69,11 +71,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Sentinel Gateway", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["POST"],
+    allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
 
@@ -145,6 +148,29 @@ async def gateway(request: Request, body: AnalyzeRequest, background_tasks: Back
         logger.exception("[Gateway] 未預期錯誤: %s", e)
         raise HTTPException(status_code=500, detail="內部錯誤")
 
+@app.post("/analyze/links")
+@limiter.limit("30/minute")
+async def gateway_analyze_links(request: Request, body: BatchUrlRequest):
+    logger.info("[Gateway] 收到連結掃描請求 - 共 %d 個 URL", len(body.urls))
+    try:
+        resp = await request.app.state.http_client.post(
+            URL_SERVICE_URL, json=body.model_dump()
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.TimeoutException:
+        logger.warning("[Gateway] URL 掃描服務回應逾時")
+        raise HTTPException(status_code=504, detail="URL 掃描服務回應逾時")
+    except httpx.ConnectError:
+        logger.error("[Gateway] 無法連線至 URL 掃描服務: %s", URL_SERVICE_URL)
+        raise HTTPException(status_code=503, detail="URL 掃描服務離線")
+    except httpx.HTTPStatusError as e:
+        logger.error("[Gateway] URL 掃描服務回傳錯誤: %s", e.response.status_code)
+        raise HTTPException(status_code=502, detail=f"URL 掃描服務內部錯誤: {e.response.status_code}")
+    except Exception as e:
+        logger.exception("[Gateway] 未預期錯誤: %s", e)
+        raise HTTPException(status_code=500, detail="內部錯誤")
+
 @app.get("/stats")
 async def get_stats():
     """
@@ -152,7 +178,7 @@ async def get_stats():
     """
     import aiosqlite
     from database import DB_PATH  # 這裡移除「.」，因為你已經在 sys.path 注入了 current_dir
-    
+
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
@@ -163,13 +189,13 @@ async def get_stats():
                 row = await cursor.fetchone()
                 # 處理資料庫為空的情況，避免回傳 null
                 result = dict(row) if row else {"total": 0, "avg_score": 0}
-                
+
                 # 格式化平均分數（取小數點後兩位）
                 if result["avg_score"] is None:
                     result["avg_score"] = 0
                 else:
                     result["avg_score"] = round(result["avg_score"], 2)
-                    
+
                 return result
     except Exception as e:
         logger.error("[Gateway] 讀取統計資料失敗: %s", e)

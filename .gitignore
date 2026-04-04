@@ -1,7 +1,9 @@
 .venv/
+venv/
 __pycache__/
 *.pyc
 .env
+*.code-workspace
 .DS_Store
 .vscode/
 models/*.pth

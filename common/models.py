@@ -1,7 +1,9 @@
 from pydantic import BaseModel, Field, field_validator, HttpUrl
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 import re
+
+from .validators import assert_public_http_url
 
 class AnalyzeRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
@@ -51,3 +53,16 @@ class AnalyzeRequest(BaseModel):
         
         # 防止日誌注入：移除換行符號並回傳字串
         return url_str.replace("\r", "").replace("\n", "")
+
+
+class BatchUrlRequest(BaseModel):
+    urls: List[str] = Field(..., min_length=1, max_length=100)
+
+    @field_validator("urls")
+    @classmethod
+    def check_urls(cls, v: List[str]) -> List[str]:
+        for url in v:
+            if not url or not url.strip():
+                raise ValueError("urls 中不可包含空字串")
+            assert_public_http_url(url.strip())
+        return v
