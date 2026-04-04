@@ -95,8 +95,6 @@ function showSafetyNotification(reason, score, quotedText = "", overrideColor = 
     const safeShortText = escapeHTML(truncatedText);
     // 3. 同時確保原因 (reason) 也要轉義，防止後端回傳值包含惡意代碼
     const safeReason = escapeHTML(reason);
-    // 這裡我們直接把整個結構（含叉叉）寫進 innerHTML
-    const shortText = quotedText.length > 25 ? quotedText.substring(0, 25) + '...' : quotedText;
     
     notify.innerHTML = `
         <div id="sentinel-close-x" style="position:absolute; top:12px; right:15px; cursor:pointer; font-size:22px; color:#aaa; line-height:1; z-index:100; transition:color 0.2s;">&times;</div>
@@ -133,7 +131,7 @@ function showSafetyNotification(reason, score, quotedText = "", overrideColor = 
     document.body.appendChild(notify);
 
     // 🚀 重點：在 appendChild 之後，才去抓那個 ID 來綁定點擊事件
-    const xBtn = document.getElementById('sentinel-close-x');
+    const xBtn = notify.querySelector('#sentinel-close-x');
     if (xBtn) {
         xBtn.onclick = (e) => {
             e.stopPropagation(); // 防止事件冒泡
