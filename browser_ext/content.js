@@ -304,107 +304,130 @@ function injectLinkToast(anchorEl, text) {
     anchorEl.setAttribute("data-sc-toast", text);
 }
 
-// --- Link Scan Toast（掛在 notification stack，hover 時顯示）---
-const SC_LINK_TOAST_ID = "sc-link-toast";
-let scLinkToastActiveTarget = null;
-let scLinkToastListenersBound = false;
+// --- Link Scan Shadow DOM Tooltip ---
+let _scTipHost = null;
+let _scTipEl = null;
+let _scTipActiveTarget = null;
+let _scTipListenersBound = false;
+let _scTipHideTimer = null;
 
-function getOrCreateLinkToast() {
-    let el = document.getElementById(SC_LINK_TOAST_ID);
-    if (!el) {
-        el = document.createElement("div");
-        el.id = SC_LINK_TOAST_ID;
-        el.setAttribute("role", "status");
-        Object.assign(el.style, {
-            ...SC_TOAST_BASE_STYLE,
-            width: "320px",
-            pointerEvents: "none",
-            display: "none",
-            opacity: "0",
-            transition: "opacity 0.15s ease",
-            borderLeft: "6px solid #4fc3f7",
-            order: "9999",
-        });
-        getOrCreateNotificationStack().appendChild(el);
-    }
-    return el;
+function initSCTooltip() {
+    if (_scTipHost) return;
+    _scTipHost = document.createElement("div");
+    _scTipHost.id = "sc-tip-host";
+    Object.assign(_scTipHost.style, {
+        position: "fixed",
+        top: "0",
+        left: "0",
+        width: "0",
+        height: "0",
+        zIndex: "2147483647",
+        pointerEvents: "none",
+        overflow: "visible",
+    });
+    const shadow = _scTipHost.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = `
+        .tip {
+            position: fixed;
+            max-width: 280px;
+            background: #fff;
+            color: #333;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-size: 13px;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.5;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+            border-left: 4px solid #4fc3f7;
+            word-break: break-word;
+            pointer-events: none;
+            opacity: 0;
+            display: none;
+            transition: opacity 0.15s ease;
+        }
+        .tip.visible {
+            display: block;
+            opacity: 1;
+        }
+        .tip-url {
+            font-size: 11px;
+            color: #888;
+            margin-top: 4px;
+            word-break: break-all;
+        }
+    `;
+    _scTipEl = document.createElement("div");
+    _scTipEl.className = "tip";
+    shadow.appendChild(style);
+    shadow.appendChild(_scTipEl);
+    document.documentElement.appendChild(_scTipHost);
 }
 
-function hideLinkToast() {
-    const el = document.getElementById(SC_LINK_TOAST_ID);
-    if (el) {
-        el.style.opacity = "0";
-        setTimeout(() => { el.style.display = "none"; }, 150);
-    }
-    scLinkToastActiveTarget = null;
+function showSCTooltip(anchorEl, text, color, url = "") {
+    initSCTooltip();
+    if (_scTipHideTimer) { clearTimeout(_scTipHideTimer); _scTipHideTimer = null; }
+    const safeText = escapeHTML(text);
+    const safeUrl = url ? escapeHTML(truncateUrl(url)) : "";
+    _scTipEl.innerHTML = `<div>${safeText}</div>${safeUrl ? `<div class="tip-url">${safeUrl}</div>` : ""}`;
+    _scTipEl.style.borderLeftColor = color;
+
+    // 先顯示以取得實際高度
+    _scTipEl.style.display = "block";
+    const TIP_W = 280;
+    const TIP_H = _scTipEl.offsetHeight || 58;
+    const rect = anchorEl.getBoundingClientRect();
+    let top = rect.bottom + 8;
+    let left = rect.left;
+    if (left + TIP_W > window.innerWidth - 8) left = window.innerWidth - TIP_W - 8;
+    if (left < 8) left = 8;
+    if (top + TIP_H > window.innerHeight - 8) top = rect.top - TIP_H - 8;
+    _scTipEl.style.top = `${top}px`;
+    _scTipEl.style.left = `${left}px`;
+    requestAnimationFrame(() => { _scTipEl.classList.add("visible"); });
 }
 
-function positionLinkToast(targetEl) {
-    const toast = getOrCreateLinkToast();
-    const text = targetEl.getAttribute("data-sc-toast");
-    if (!text) {
-        hideLinkToast();
-        return;
-    }
+function hideSCTooltip() {
+    if (!_scTipEl) return;
+    _scTipEl.classList.remove("visible");
+    _scTipHideTimer = setTimeout(() => { _scTipHideTimer = null; if (_scTipEl) _scTipEl.style.display = "none"; }, 150);
+    _scTipActiveTarget = null;
+}
 
-    const status = targetEl.getAttribute("data-sc-status") || "default";
+function showSCTooltipForEl(anchorEl) {
+    const text = anchorEl.getAttribute("data-sc-toast");
+    if (!text) { hideSCTooltip(); return; }
+    const status = anchorEl.getAttribute("data-sc-status") || "default";
     const color = SC_STATUS_COLORS[status] ?? SC_STATUS_COLORS.default;
-    toast.style.borderLeft = `4px solid ${color}`;
-    const url = targetEl.href || "";
-    const safeText = escapeHTML(text);
-    const safeUrl = url ? escapeHTML(truncateUrl(url)) : "";
-    toast.innerHTML = `<div>${safeText}</div>${safeUrl ? `<div style="font-size:12px;color:#888;margin-top:4px;word-break:break-all;">${safeUrl}</div>` : ""}`;
-    toast.style.display = "block";
-    requestAnimationFrame(() => { toast.style.opacity = "1"; });
-}
-
-function showLinkToast(targetEl) {
-    scLinkToastActiveTarget = targetEl;
-    positionLinkToast(targetEl);
-}
-
-function showLinkToastDirect(text, borderColor = SC_STATUS_COLORS.default, url = "") {
-    const toast = getOrCreateLinkToast();
-    scLinkToastActiveTarget = null;
-    toast.style.borderLeft = `4px solid ${borderColor}`;
-    const safeText = escapeHTML(text);
-    const safeUrl = url ? escapeHTML(truncateUrl(url)) : "";
-    toast.innerHTML = `<div>${safeText}</div>${safeUrl ? `<div style="font-size:12px;color:#888;margin-top:4px;word-break:break-all;">${safeUrl}</div>` : ""}`;
-    toast.style.display = "block";
-    requestAnimationFrame(() => { toast.style.opacity = "1"; });
+    showSCTooltip(anchorEl, text, color, anchorEl.href || "");
 }
 
 function initSentinelLinkToasts() {
-    if (scLinkToastListenersBound) return;
-    scLinkToastListenersBound = true;
+    if (_scTipListenersBound) return;
+    _scTipListenersBound = true;
 
-    document.addEventListener(
-        "mouseover",
-        (e) => {
-            // 已掃描：直接顯示 toast
-            const t = e.target.closest("[data-sc-toast]");
-            if (t && document.documentElement.contains(t)) {
-                if (scLinkToastActiveTarget !== t) showLinkToast(t);
-                return;
+    document.addEventListener("mouseover", (e) => {
+        // 已掃描：直接顯示 tooltip
+        const t = e.target.closest("[data-sc-toast]");
+        if (t && document.documentElement.contains(t)) {
+            if (_scTipActiveTarget !== t) {
+                _scTipActiveTarget = t;
+                showSCTooltipForEl(t);
             }
-            // 未掃描：hover 時觸發掃描
-            const a = e.target.closest("a[href]");
-            if (a) scanOnHover(a);
-        },
-        true
-    );
+            return;
+        }
+        // 未掃描：hover 時觸發掃描
+        const a = e.target.closest("a[href]");
+        if (a) scanOnHover(a);
+    }, true);
 
-    document.addEventListener(
-        "mouseout",
-        (e) => {
-            const from = e.target.closest("[data-sc-toast]");
-            if (!from) return;
-            const rel = e.relatedTarget;
-            if (rel && (from === rel || from.contains(rel))) return;
-            hideLinkToast();
-        },
-        true
-    );
+    document.addEventListener("mouseout", (e) => {
+        const from = e.target.closest("[data-sc-toast]");
+        if (!from) return;
+        const rel = e.relatedTarget;
+        if (rel && (from === rel || from.contains(rel))) return;
+        hideSCTooltip();
+    }, true);
 }
 
 function ensureScanStyles() {
@@ -412,29 +435,6 @@ function ensureScanStyles() {
     const style = document.createElement("style");
     style.id = "sc-styles";
     style.textContent = `
-      .sc-badge {
-        display: inline-flex;
-        align-items: center;
-        font-size: 0.78em;
-        font-weight: 600;
-        margin-left: 5px;
-        padding: 1px 6px;
-        border-radius: 4px;
-        cursor: help;
-        vertical-align: middle;
-        line-height: 1.4;
-        letter-spacing: 0.02em;
-      }
-      .sc-badge.sc-malicious {
-        background: ${SC_STATUS_COLORS.malicious}1f;
-        color: #b91c1c;
-        border: 1px solid ${SC_STATUS_COLORS.malicious}59;
-      }
-      .sc-badge.sc-suspicious {
-        background: ${SC_STATUS_COLORS.suspicious}1f;
-        color: #92400e;
-        border: 1px solid ${SC_STATUS_COLORS.suspicious}59;
-      }
       a.sc-flagged-safe {
         outline: 2px solid ${SC_STATUS_COLORS.safe} !important;
         outline-offset: 2px !important;
@@ -475,11 +475,6 @@ function injectWarningUI(anchorEl, result) {
     anchorEl.setAttribute("data-sc-status", lower);
     anchorEl.classList.add(`sc-flagged-${lower}`);
     injectLinkToast(anchorEl, toastText);
-
-    const badge = document.createElement("span");
-    badge.className = `sc-badge sc-${lower}`;
-    badge.textContent = isMalicious ? "⚠️ 危險" : "❓ 可疑";
-    anchorEl.insertAdjacentElement("afterend", badge);
 }
 
 async function scanOnHover(anchorEl) {
@@ -489,7 +484,7 @@ async function scanOnHover(anchorEl) {
     pendingScans.add(href);
     scannedUrls.add(href);
 
-    showLinkToastDirect("🔍 Sentinel 掃描中...", SC_STATUS_COLORS.default, href);
+    showSCTooltip(anchorEl, "🔍 Sentinel 掃描中...", SC_STATUS_COLORS.default, href);
 
     try {
         const data = await sentinelBackendFetch(`${BACKEND_URL}/analyze/links`, {
@@ -502,17 +497,17 @@ async function scanOnHover(anchorEl) {
             scannedResults.set(result.url, result);
             injectWarningUI(anchorEl, result);
             if (document.documentElement.contains(anchorEl)) {
-                showLinkToast(anchorEl);
+                showSCTooltipForEl(anchorEl);
             } else {
-                hideLinkToast();
+                hideSCTooltip();
             }
         } else {
-            hideLinkToast();
+            hideSCTooltip();
         }
     } catch (err) {
-        showLinkToastDirect("⚠️ 掃描失敗，後端無法連線", SC_STATUS_COLORS.malicious);
+        showSCTooltip(anchorEl, "⚠️ 掃描失敗，後端無法連線", SC_STATUS_COLORS.malicious);
         scannedUrls.delete(href);
-        setTimeout(() => hideLinkToast(), 3000);
+        setTimeout(() => hideSCTooltip(), 3000);
     } finally {
         pendingScans.delete(href);
     }
