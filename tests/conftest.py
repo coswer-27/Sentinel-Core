@@ -1,7 +1,7 @@
 import sys
 import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Mock heavy ML dependencies before any test file imports NLP service code
 sys.modules.setdefault("transformers", MagicMock())
@@ -40,3 +40,11 @@ def gateway_with_mock_nlp(gateway_client):
         return_value=build_nlp_mock_response()
     )
     return gateway_client
+
+
+@pytest.fixture(autouse=True)
+def mock_db_operations():
+    """全域 Mock 資料庫操作，避免測試污染真實資料庫。"""
+    with patch("api_gateway.database.log_scan", new_callable=AsyncMock) as mock_log, \
+         patch("api_gateway.database.init_db", new_callable=AsyncMock) as mock_init:
+        yield mock_log, mock_init

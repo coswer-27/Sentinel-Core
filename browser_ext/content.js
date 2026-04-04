@@ -59,13 +59,13 @@ document.addEventListener('mouseup', function() {
 // --- 2. 與後端通訊 ---
 async function analyzeText(text) {
     try {
+        const rawUrl = getSanitizedURL();
+        const isPublicUrl = rawUrl !== "unknown" && !/^https?:\/\/(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/i.test(rawUrl);
         const data = await sentinelBackendFetch("http://127.0.0.1:8000/analyze", {
             method: "POST",
             body: {
-                request_id: "ui-test-" + Date.now(),
-                payload_type: "text",
                 content: text,
-                url: getSanitizedURL(),
+                url: isPublicUrl ? rawUrl : null,
             },
         });
 
@@ -141,8 +141,6 @@ function showSafetyNotification(
     overrideIcon = null,
     overrideTitle = null
 ) {
-    // if (document.getElementById("sentinel-notify")) return;
-
     const raw = Number(score);
     const s = Math.max(0, Math.min(100, Math.round(Number.isFinite(raw) ? raw : 0)));
     const risk = 100 - s;
@@ -191,9 +189,11 @@ function showSafetyNotification(
         pointerEvents: "auto",
         animation: "sentinel-fade-in 0.4s ease-out",
         wordBreak: "break-word",
+        position: "relative",
     });
 
     notify.innerHTML = `
+        <div id="sentinel-close-x" style="position:absolute; top:12px; right:15px; cursor:pointer; font-size:22px; color:#aaa; line-height:1; z-index:100; transition:color 0.2s;">&times;</div>
         <div style="display: flex; align-items: center; margin-bottom: 10px;">
             <span style="font-size: 24px; margin-right: 10px;">${safeIcon}</span>
             <strong style="font-size: 16px; color: ${theme.color};">${safeTitle}</strong>
@@ -211,6 +211,16 @@ function showSafetyNotification(
     `;
 
     getOrCreateNotificationStack().appendChild(notify);
+
+    const xBtn = notify.querySelector('#sentinel-close-x');
+    if (xBtn) {
+        xBtn.onclick = (e) => {
+            e.stopPropagation();
+            notify.remove();
+        };
+        xBtn.onmouseover = () => { xBtn.style.color = theme.color; };
+        xBtn.onmouseout = () => { xBtn.style.color = '#aaa'; };
+    }
 
     const fill = notify.querySelector(".sentinel-risk-fill");
     if (fill) {
