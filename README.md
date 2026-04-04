@@ -16,10 +16,11 @@ Sentinel-Core 是一個基於微服務架構的資安防護工具，結合 **BER
 
 ## 🏗️ 系統架構 (Architecture)
 
-1. **API Gateway (Port 8000)**: 入口網關，負責流量限制 (Rate Limiting)、SSRF 防護、請求轉發與規則攔截。
-2. **NLP Service (Port 8001)**: AI 運算單元，執行微調後的 BERT 語意分析模型推論。
-3. **Chrome Extension**: 前端偵測插件，實作即時文字選取監聽與三色動態預警 UI。
-4. **SQLite Database**: 透過 `aiosqlite` 非同步紀錄所有偵測日誌與統計數據。
+1. **API Gateway (Port 8000)**: 入口網關，負責流量監控、SSRF 防護、以及將請求分流至不同微服務。
+2. **NLP Service (Port 8001)**: AI 運算單元，執行 BERT 模型推論。
+3. **Link Scanner (Port 8002) [New]**: 連結掃描引擎，整合 Google Safe Browsing 與啟發式檢測。
+4. **Chrome Extension (MV3)**: 前端偵測插件，改採 **Service Worker (background.js)** 架構以符合現代瀏覽器安全規範。
+5. **SQLite Database**: 非同步紀錄偵測日誌。
 
 ---
 
@@ -34,6 +35,13 @@ Sentinel-Core 是一個基於微服務架構的資安防護工具，結合 **BER
 ---
 
 ## 📜 版本紀錄 (Changelog)
+#### **v2.4 - 連結掃描整合與前端架構重構 (最新)**
+* **[微服務] 連結掃描引擎 (service_link_scanner)**：新增獨立服務，支援 Google Safe Browsing (GSB) 惡意網址對比與 Redirect 重新導向追蹤。
+* **[偵測] 啟發式網址分析**：支援 Punycode 偽裝偵測、可疑 TLD (.xyz/.tk) 識別。
+* **[前端] MV3 架構重構**：導入 `background.js` (Service Worker) 處理通訊，修復 Content Script 在非 HTTPS 頁面無法 fetch 本地 API 的限制。
+* **[UI] 堆疊式通知優化**：重構 Toast UI，支援 Flex 堆疊顯示，解決多重預警重疊問題 (UI-04)。
+* **[資安] 全域 SSRF 強化**：實作 `assert_public_http_url` 驗證器，嚴格禁止探測內部私有網路。
+
 #### **v2.3 - 數據持久化與背景任務**
 * **[資料庫] 異步日誌系統**：導入 `aiosqlite` 實作非同步掃描紀錄，確保偵測數據持久化。
 * **[穩定性] 背景任務處理**：使用 FastAPI `BackgroundTasks` 執行資料庫寫入，確保 I/O 延遲不影響 API 回應速度。
@@ -70,7 +78,7 @@ Sentinel-Core 是一個基於微服務架構的資安防護工具，結合 **BER
 ---
 
 
-### 🛠️ 安裝與啟動步驟 (Sentinel-Core v2.2)
+### 🛠️ 安裝與啟動步驟 (Sentinel-Core v2.4)
 
 本專案採用微服務架構，啟動前請確保已完成環境依賴安裝，並依序啟動後端服務。
 
@@ -109,6 +117,14 @@ python main.py
 * **檢查點**：出現 `Uvicorn running on http://127.0.0.1:8000`。
 * **預設位址**：`http://127.0.0.1:8000`
 
+#### 🚀 第三步：啟動連結掃描服務 (惡意網址偵測)
+```powershell
+cd service_link_scanner
+python main.py
+```
+檢查點：終端機顯示啟發式偵測器已就緒。
+預設位址：`http://127.0.0.1:8002`
+
 > **備註**：首次啟動 `api_gateway` 時，系統會自動在根目錄建立 `sentinel_logs.db` 檔案。該檔案已列入 `.gitignore` 以確保數據隱私。
 ---
 
@@ -139,6 +155,8 @@ python -m pytest tests/ -v
 | **安全內容** | "今天的天氣真好，適合去圖書館。" | 🟢 綠色通知：顯示 `Safe` 與評分 | BERT NLP (L2) |
 | **格式錯誤** | (選取超過 5000 字的長文) | ⚪ 灰色通知：顯示 `422 格式錯誤` | Pydantic Model |
 | **連線失敗** | (關閉 8000 埠後執行) | ⚪ 灰色通知：顯示 `連線失敗` | Extension Logic |
+| **惡意連結** | `http://apple-login.xyz` | 🔴 顯示 `[惡意網域]` | Link Scanner (L1.5) |
+| **重新導向** | (多層跳轉連結) | ⚠️ 顯示 `可疑重新導向` | Link Scanner (L1.5) |
 
 ---
 
@@ -149,7 +167,7 @@ python -m pytest tests/ -v
 - **功能**: 執行規則攔截與 AI 語意辨識。
 - **Rate Limit**: 30 請求/分鐘 (v2.4 調整)。
 
-### 2. 統計數據接口 (New!)
+### 2. 統計數據接口
 - **Endpoint**: `GET /stats`
 - **功能**: 獲取系統累計偵測數據。
 - **Response**:
@@ -159,4 +177,8 @@ python -m pytest tests/ -v
   "avg_score": 75.5
 }
 ```
+### 3. 連結分析接口
+- **Endpoint**: `POST /analyze/links`
+- **功能**: 批次掃描頁面連結安全性。
+- **Rate Limit**: 30 請求/分鐘。
 ---
