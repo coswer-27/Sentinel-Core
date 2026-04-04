@@ -43,7 +43,8 @@ logger = logging.getLogger(__name__)
 NLP_URL = os.environ.get("NLP_SERVICE_URL", "http://127.0.0.1:8001/analyze")
 
 limiter = Limiter(key_func=get_remote_address)
-RATE_LIMIT_STR = os.environ.get("GATEWAY_RATE_LIMIT", "10/minute")
+# 修改後 (Fix 08)
+RATE_LIMIT_STR = os.environ.get("GATEWAY_RATE_LIMIT", "30/minute")
 
 def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     logger.warning("[Gateway] Rate limit exceeded: %s", request.client)
