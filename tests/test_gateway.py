@@ -351,3 +351,104 @@ def test_analyze_links_upstream_offline_returns_503(gateway_client):
     )
     response = gateway_client.post("/analyze/links", json={"urls": ["https://x.test"]})
     assert response.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Behavior analysis + fusion endpoint
+# ---------------------------------------------------------------------------
+
+def _url_scan_resp(label="Safe", trust=90):
+    m = MagicMock()
+    m.raise_for_status = MagicMock()
+    m.json.return_value = {"results": [{
+        "url": "https://x.test", "final_url": "https://x.test",
+        "trust_score": trust, "label": label, "reason": "r", "hop_count": 0,
+    }]}
+    return m
+
+
+def test_analyze_behavior_external_password_form_is_danger(gateway_client):
+    async def router(url, json=None, **kw):
+        if url == gateway_main.URL_SERVICE_URL:
+            return _url_scan_resp()
+        if url == gateway_main.EXPLAIN_URL:
+            m = MagicMock(); m.raise_for_status = MagicMock()
+            m.json.return_value = {"explanation": "此頁要求於外部網域輸入密碼，疑似釣魚。", "source": "fallback"}
+            return m
+        raise AssertionError(f"unexpected url {url}")
+
+    gateway_client.app.state.http_client.post = AsyncMock(side_effect=router)
+    r = gateway_client.post("/analyze/behavior", json={
+        "url": "https://x.test", "features": {"external_password_form": True},
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["behavior_score"] == 60
+    assert data["label"] == "Danger"
+    assert data["explanation"]
+
+
+def test_analyze_behavior_low_risk_does_not_call_explain(gateway_client):
+    calls = []
+
+    async def router(url, json=None, **kw):
+        calls.append(url)
+        if url == gateway_main.URL_SERVICE_URL:
+            return _url_scan_resp()
+        raise AssertionError(f"unexpected url {url}")
+
+    gateway_client.app.state.http_client.post = AsyncMock(side_effect=router)
+    r = gateway_client.post("/analyze/behavior", json={
+        "url": "https://x.test", "features": {"form_action_external": True},
+    })
+    assert r.status_code == 200
+    assert r.json()["label"] != "Danger"
+    assert gateway_main.EXPLAIN_URL not in calls
+
+
+def test_analyze_behavior_tolerates_url_scan_failure(gateway_client):
+    async def router(url, json=None, **kw):
+        if url == gateway_main.URL_SERVICE_URL:
+            raise httpx.ConnectError("link service down")
+        if url == gateway_main.EXPLAIN_URL:
+            m = MagicMock(); m.raise_for_status = MagicMock()
+            m.json.return_value = {"explanation": "x", "source": "fallback"}
+            return m
+        raise AssertionError(f"unexpected url {url}")
+
+    gateway_client.app.state.http_client.post = AsyncMock(side_effect=router)
+    r = gateway_client.post("/analyze/behavior", json={
+        "url": "https://x.test", "features": {"external_password_form": True},
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["label"] == "Danger"   # 行為極高，URL 掃描失敗仍升級
+    assert data["url"] is None
+
+
+def test_analyze_behavior_private_url_rejected(gateway_client):
+    r = gateway_client.post("/analyze/behavior", json={
+        "url": "http://192.168.1.1/", "features": {"external_password_form": True},
+    })
+    assert r.status_code == 422
+
+
+def test_analyze_behavior_script_heavy_legit_site_not_danger(gateway_client):
+    """回歸：Google 等腳本/iframe 繁多的正常網站不應被判 Danger。"""
+    async def router(url, json=None, **kw):
+        if url == gateway_main.URL_SERVICE_URL:
+            return _url_scan_resp()
+        raise AssertionError(f"unexpected url {url}")
+
+    gateway_client.app.state.http_client.post = AsyncMock(side_effect=router)
+    r = gateway_client.post("/analyze/behavior", json={
+        "url": "https://www.google.com/search",
+        "features": {
+            "obfuscated_script": True, "dynamic_script_inject": 80,
+            "cross_origin_iframe_count": 10, "password_field_count": 1,
+        },
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["behavior_score"] == 0
+    assert data["label"] != "Danger"
