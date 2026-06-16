@@ -1,0 +1,9 @@
+# 訓練/評估用額外依賴（與服務執行時的 requirements 分離）
+# GPU 版 torch 請另外安裝：
+#   pip install torch==2.11.0+cu126 --index-url https://download.pytorch.org/whl/cu126
+transformers>=4.40
+datasets>=2.19
+accelerate>=0.30
+evaluate>=0.4
+scikit-learn>=1.4
+matplotlib>=3.8
