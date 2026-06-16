@@ -10,3 +10,9 @@ models/*.pth
 models/*.bin
 *.db
 sentinel_logs.db
+
+# 訓練產物（可由 seeds + templates 重新產生 / 由訓練腳本重新訓練）
+service_nlp/train/data/
+service_nlp/detectors/model/
+service_nlp/train/runs/
+service_nlp/train/reports/

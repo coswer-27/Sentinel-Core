@@ -3,6 +3,7 @@ import os
 import uvicorn
 import httpx
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # 將當前目錄與專案根目錄加入路徑
@@ -43,6 +44,38 @@ logger = logging.getLogger(__name__)
 
 NLP_URL = os.environ.get("NLP_SERVICE_URL", "http://127.0.0.1:8001/analyze")
 URL_SERVICE_URL = os.environ.get("URL_SERVICE_URL", "http://127.0.0.1:8002/analyze/links")
+EXPLAIN_URL = os.environ.get("EXPLAIN_SERVICE_URL", "http://127.0.0.1:8004/explain")
+
+
+def should_explain(label: str | None) -> bool:
+    """高風險（Danger）才觸發 LLM 可解釋層，避免對安全內容浪費呼叫。"""
+    return label == "Danger"
+
+
+async def _attach_explanation(client, nlp_res: dict, body) -> dict:
+    """呼叫 service_explain 取得人類可讀解釋並掛到回應上；失敗則靜默略過。"""
+    payload = {
+        "nlp": {
+            "category": nlp_res.get("category"),
+            "trust_score": nlp_res.get("trust_score"),
+            "confidence": nlp_res.get("confidence"),
+        },
+        "text_snippet": body.content,
+    }
+    if body.url:
+        payload["url"] = {"final_url": str(body.url)}
+    try:
+        resp = await client.post(EXPLAIN_URL, json=payload)
+        resp.raise_for_status()
+        exp = resp.json()
+        return {
+            **nlp_res,
+            "explanation": exp.get("explanation"),
+            "explanation_source": exp.get("source"),
+        }
+    except Exception as e:
+        logger.warning("[Gateway] 解釋服務呼叫失敗，略過: %s", e)
+        return nlp_res
 
 limiter = Limiter(key_func=get_remote_address)
 # 修改後 (Fix 08)
@@ -122,6 +155,12 @@ async def gateway(request: Request, body: AnalyzeRequest, background_tasks: Back
         resp.raise_for_status()
         nlp_res = resp.json()
 
+        # --- v3.0 高風險 → LLM 可解釋層 ---
+        if should_explain(nlp_res.get("label")):
+            nlp_res = await _attach_explanation(
+                request.app.state.http_client, nlp_res, body
+            )
+
         # --- v2.3 紀錄 NLP 分析結果日誌 (改為背景任務) ---
         background_tasks.add_task(
             safe_log_scan,
@@ -150,14 +189,29 @@ async def gateway(request: Request, body: AnalyzeRequest, background_tasks: Back
 
 @app.post("/analyze/links")
 @limiter.limit("30/minute")
-async def gateway_analyze_links(request: Request, body: BatchUrlRequest):
+async def gateway_analyze_links(request: Request, body: BatchUrlRequest, background_tasks: BackgroundTasks):
     logger.info("[Gateway] 收到連結掃描請求 - 共 %d 個 URL", len(body.urls))
     try:
         resp = await request.app.state.http_client.post(
             URL_SERVICE_URL, json=body.model_dump()
         )
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+
+        # --- v3.0 紀錄被標記的連結掃描（僅非 Safe，避免 hover 大量安全連結灌爆 DB）---
+        ts = datetime.now(timezone.utc).isoformat()
+        for item in data.get("results", []):
+            if item.get("label") and item["label"] != "Safe":
+                background_tasks.add_task(
+                    safe_log_scan,
+                    content=item.get("url") or "",
+                    url=item.get("url"),
+                    score=item.get("trust_score", 0),
+                    label=item["label"],
+                    reason=item.get("reason", ""),
+                    ts=ts,
+                )
+        return data
     except httpx.TimeoutException:
         logger.warning("[Gateway] URL 掃描服務回應逾時")
         raise HTTPException(status_code=504, detail="URL 掃描服務回應逾時")
@@ -170,6 +224,37 @@ async def gateway_analyze_links(request: Request, body: BatchUrlRequest):
     except Exception as e:
         logger.exception("[Gateway] 未預期錯誤: %s", e)
         raise HTTPException(status_code=500, detail="內部錯誤")
+
+@app.get("/recent")
+async def get_recent(limit: int = 8):
+    """
+    v3.0 近期掃描：回傳最近 N 筆掃描紀錄（供 popup 主控台顯示）。
+    content 截斷至 80 字，避免回傳過長內容。
+    """
+    import aiosqlite
+    from database import DB_PATH
+
+    limit = max(1, min(int(limit), 50))
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT content, url, trust_score, label, reason, created_at "
+                "FROM scan_logs ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+            async with cursor:
+                rows = await cursor.fetchall()
+                items = []
+                for row in rows:
+                    item = dict(row)
+                    content = item.get("content") or ""
+                    item["content"] = content[:80]
+                    items.append(item)
+                return {"items": items}
+    except Exception as e:
+        logger.error("[Gateway] 讀取近期掃描失敗: %s", e)
+        raise HTTPException(status_code=500, detail="無法讀取近期掃描")
 
 @app.get("/stats")
 async def get_stats():

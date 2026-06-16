@@ -1,111 +1,76 @@
+"""
+BertDetector 整合測試（使用真實 fine-tuned 模型）。
+
+若模型尚未訓練（detectors/model 不存在），整個模組會被 skip，
+不影響其他測試。完整驗證請另跑：
+    python service_nlp/train/smoke_test_engine.py
+"""
 import sys
-import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
-# transformers is mocked in conftest.py before this file is collected,
-# but setdefault here ensures isolation if this file is run standalone.
-sys.modules.setdefault("transformers", MagicMock())
+import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "service_nlp"))
+_service_nlp_path = str(Path(__file__).parent.parent / "service_nlp")
+if _service_nlp_path not in sys.path:
+    sys.path.insert(0, _service_nlp_path)
 
-from detectors.bert_engine import BertDetector  # noqa: E402
+from detectors.bert_engine import BertDetector, MODEL_DIR, CATEGORY_LABELS  # noqa: E402
+
+pytestmark = pytest.mark.skipif(
+    not (MODEL_DIR / "config.json").exists(),
+    reason="fine-tuned 模型尚未訓練；請先執行 service_nlp/train/fine_tune.py",
+)
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def detector():
-    with patch("detectors.bert_engine.pipeline") as mock_pipeline:
-        mock_classifier = MagicMock()
-        mock_pipeline.return_value = mock_classifier
-        d = BertDetector()
-        d._mock_classifier = mock_classifier
-        yield d
+    return BertDetector()
 
-
-# ---------------------------------------------------------------------------
-# Initialisation
-# ---------------------------------------------------------------------------
 
 class TestBertDetectorInit:
-    def test_init_calls_pipeline_with_correct_args(self):
-        with patch("detectors.bert_engine.pipeline") as mock_pipeline:
-            mock_pipeline.return_value = MagicMock()
-            BertDetector()
-            mock_pipeline.assert_called_once_with(
-                "sentiment-analysis",
-                model="nlptown/bert-base-multilingual-uncased-sentiment",
-            )
+    def test_missing_model_raises_runtime_error(self, tmp_path, monkeypatch):
+        import detectors.bert_engine as engine
+        monkeypatch.setattr(engine, "MODEL_DIR", tmp_path / "nonexistent")
+        with pytest.raises(RuntimeError, match="找不到 fine-tuned 模型"):
+            engine.BertDetector()
 
-    def test_init_raises_runtime_error_on_load_failure(self):
-        with patch("detectors.bert_engine.pipeline", side_effect=OSError("model not found")):
-            with pytest.raises(RuntimeError, match="BERT 模型載入失敗"):
-                BertDetector()
-
-
-# ---------------------------------------------------------------------------
-# analyse()
-# ---------------------------------------------------------------------------
 
 class TestBertDetectorAnalyze:
-    def test_empty_text_returns_neutral_50(self, detector):
-        assert detector.analyze("") == 50
+    def test_empty_text_returns_safe_neutral(self, detector):
+        r = detector.analyze("")
+        assert r["category"] == "safe"
+        assert r["trust_score"] == 50
 
-    def test_whitespace_only_returns_neutral_50(self, detector):
-        assert detector.analyze("   \t\n  ") == 50
+    def test_whitespace_returns_safe_neutral(self, detector):
+        assert detector.analyze("   \t\n ")["category"] == "safe"
 
-    def test_all_weight_on_five_stars_returns_100(self, detector):
-        detector._mock_classifier.return_value = [
-            {"label": "5 stars", "score": 1.0},
-            {"label": "4 stars", "score": 0.0},
-            {"label": "3 stars", "score": 0.0},
-            {"label": "2 stars", "score": 0.0},
-            {"label": "1 star",  "score": 0.0},
-        ]
-        assert detector.analyze("perfect content") == 100
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("您的網路銀行帳號偵測到異常登入，請點擊連結驗證身分", "phishing"),
+            ("老師帶你買飆股穩賺不賠，加LINE進群免費領取明牌", "investment_scam"),
+            ("親愛的我是駐外軍官，因戰地無法領薪需要你幫忙代收包裹", "romance_scam"),
+            ("您的包裹因地址不全無法配送，請點連結更新收件資訊", "parcel_scam"),
+            ("我是地檢署檢察官，您涉及洗錢案請將存款轉入安全帳戶", "gov_impersonation"),
+            ("明天下午三點開會，地點在三樓會議室，記得帶筆電", "safe"),
+        ],
+    )
+    def test_six_categories(self, detector, text, expected):
+        assert detector.analyze(text)["category"] == expected
 
-    def test_all_weight_on_one_star_returns_0(self, detector):
-        detector._mock_classifier.return_value = [
-            {"label": "1 star",  "score": 1.0},
-            {"label": "2 stars", "score": 0.0},
-            {"label": "3 stars", "score": 0.0},
-            {"label": "4 stars", "score": 0.0},
-            {"label": "5 stars", "score": 0.0},
-        ]
-        assert detector.analyze("terrible scam") == 0
+    def test_scam_has_low_trust_score(self, detector):
+        r = detector.analyze("您的帳戶異常請立即點擊連結驗證否則凍結")
+        assert r["trust_score"] < 50
+        assert r["scam_probability"] > 0.5
 
-    def test_three_stars_returns_50(self, detector):
-        detector._mock_classifier.return_value = [
-            {"label": "3 stars", "score": 1.0},
-            {"label": "1 star",  "score": 0.0},
-            {"label": "2 stars", "score": 0.0},
-            {"label": "4 stars", "score": 0.0},
-            {"label": "5 stars", "score": 0.0},
-        ]
-        assert detector.analyze("neutral content") == 50
+    def test_safe_has_high_trust_score(self, detector):
+        r = detector.analyze("今天天氣很好，下午一起去公園散步吧")
+        assert r["trust_score"] > 50
 
-    def test_mixed_probabilities_weighted_average(self, detector):
-        # 0.8*100 + 0.1*75 + 0.05*50 + 0.03*25 + 0.02*0 = 90.75 → rounds to 91
-        detector._mock_classifier.return_value = [
-            {"label": "5 stars", "score": 0.80},
-            {"label": "4 stars", "score": 0.10},
-            {"label": "3 stars", "score": 0.05},
-            {"label": "2 stars", "score": 0.03},
-            {"label": "1 star",  "score": 0.02},
-        ]
-        assert detector.analyze("mostly good article") == 91
-
-    def test_result_is_integer(self, detector):
-        detector._mock_classifier.return_value = [
-            {"label": "5 stars", "score": 0.5},
-            {"label": "1 star",  "score": 0.5},
-            {"label": "2 stars", "score": 0.0},
-            {"label": "3 stars", "score": 0.0},
-            {"label": "4 stars", "score": 0.0},
-        ]
-        result = detector.analyze("mixed content")
-        assert isinstance(result, int)
-
-    def test_inference_failure_raises_runtime_error(self, detector):
-        detector._mock_classifier.side_effect = Exception("BERT exploded")
-        with pytest.raises(RuntimeError, match="BERT 推論失敗"):
-            detector.analyze("some text")
+    def test_return_shape(self, detector):
+        r = detector.analyze("測試內容")
+        for key in ("category", "category_desc", "confidence", "trust_score", "scam_probability"):
+            assert key in r
+        assert r["category"] in CATEGORY_LABELS
+        assert 0.0 <= r["confidence"] <= 1.0
+        assert 0 <= r["trust_score"] <= 100

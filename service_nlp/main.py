@@ -19,8 +19,6 @@ from common.models import AnalyzeRequest
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-TRUST_THRESHOLD = 55
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -45,15 +43,28 @@ async def nlp_endpoint(body: AnalyzeRequest):
         # H-2: 雖然接收了 url/timestamp，但目前僅用於日誌紀錄 (審計)
         if body.url:
             logger.info("[NLP] 分析請求來源 URL: %s", body.url)
-        
-        trust_score = app.state.detector.analyze(body.content)
+
+        result = app.state.detector.analyze(body.content)
     except RuntimeError as e:
         logger.error("[NLP] 推論失敗: %s", e)
         raise HTTPException(status_code=500, detail=f"推論失敗: {e}")
+
+    category = result["category"]
+    is_scam = category != "safe"
+    confidence = result["confidence"]
+    if is_scam:
+        reason = f"偵測為「{result['category_desc']}」（信心 {confidence:.0%}）"
+    else:
+        reason = f"未偵測到明顯詐騙特徵（信心 {confidence:.0%}）"
+
     return {
-        "trust_score": trust_score,
-        "label": "Danger" if trust_score <= TRUST_THRESHOLD else "Safe",
-        "reason": f"AI 分析信任度為 {trust_score}%",
+        "trust_score": result["trust_score"],
+        "label": "Danger" if is_scam else "Safe",
+        "reason": reason,
+        "category": category,
+        "category_desc": result["category_desc"],
+        "confidence": confidence,
+        "scam_probability": result["scam_probability"],
     }
 
 if __name__ == "__main__":

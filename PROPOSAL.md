@@ -60,6 +60,7 @@ Sentinel-Core 的核心使命是建立一個具備語意理解能力的主動防
 | **v2.2-stable** | **Refactor**: 導入 L1 Regex / L2 BERT 雙層偵測架構<br>**Test**: 通過 81 項 `pytest` 自動化單元測試 |
 | **v2.3-final** | **Security**: 實作 XSS Sanitization 與數值 Clamping 防禦<br>**Feat**: 導入 `aiosqlite` 異步持久化日誌系統 |
 | **v2.4-stable** | **Arch**: 導入 `service_link_scanner` (Port 8002) 支援 GSB 與啟發式檢測<br>**Refactor**: 前端遷移至 MV3 Service Worker (background.js) 架構以解決 CORS 限制<br>**Security**: 全域 SSRF 防護邏輯與多層 Redirect 鏈結追蹤機制 |
+| **v3.0-dev** | **AI Engine**: 將 L2 由情感星等模型（`nlptown sentiment`）替換為 **fine-tuned 繁中六類詐騙分類器**（`hfl/chinese-roberta-wwm-ext`）<br>**Feat**: 新增 `service_explain` LLM 可解釋推理層 (Port 8004)，高風險時生成繁中解釋<br>**Eval**: 同分布測試集 macro-F1 0.998、分布外 (OOD) 真實風格 macro-F1 0.865，二元偵測 F1 均顯著優於 baseline |
 
 #### 1.3.3 Document Status
 本文件目前對應之程式碼狀態為 **`main` branch (Release Candidate)**。
@@ -326,12 +327,14 @@ L1 引擎作為系統的第一道防線，主要處理具備強烈特徵的已�
 ### 5.3 Layer 2: Semantic Analysis Engine (BERT Model)
 
 #### 5.3.1 Model Architecture
-當 L1 引擎無法給出確定性結論時，系統將調用 **BERT-Base (Bidirectional Encoder Representations from Transformers)** 模型進行深層分析。
-* **Contextual Embedding**: 不同於簡單的關鍵字比對，BERT 能理解詞彙在句子中的前後語境關係，精準辨識「假冒官方通知」與「一般正常討論」之差異。
-* **Softmax Classification**: 模型最終輸出一個 0 到 1 之間的機率值，代表該文本屬於「詐騙語境」的可能性。
+當 L1 引擎無法給出確定性結論時，系統調用一個**針對台灣詐騙話術 fine-tune 的繁中分類模型**進行深層分析。基礎模型採用中文全詞遮罩的 **`hfl/chinese-roberta-wwm-ext`**（RoBERTa-wwm），於分類頭輸出六個類別。
+* **Contextual Embedding**: 不同於簡單關鍵字比對，模型理解詞彙在句子中的前後語境關係，能辨識「假冒官方通知」與「一般正常討論」之差異。
+* **6-class Softmax**: 模型輸出六類機率分布——`phishing`（釣魚）、`investment_scam`（假投資）、`romance_scam`（感情詐騙）、`parcel_scam`（假包裹）、`gov_impersonation`（假冒政府）、`safe`（正常）。系統以 `trust_score = P(safe) × 100` 換算信任分數，並回傳偵測到的詐騙類型。
 
-#### 5.3.2 Model Fine-tuning
-我們針對中文詐騙資料集進行了特定領域的微調 (Fine-tuning)，顯著提升了系統對社群媒體釣魚與簡訊詐騙話術的辨識率。
+#### 5.3.2 Model Fine-tuning（資料與訓練方法）
+* **資料策略（混合式）**: 由於台灣繁中詐騙語料無現成大型公開資料集（165 詐騙 LINE ID 開放資料已於 2024/11 因打詐新法下架），本專案以**真實話術為種子**（165／刑事局公開話術、新聞案例、各類詐騙截圖文字）並輔以**模板 / LLM 式語意增強**平衡六類別，負樣本取自正常客服、廣告、新聞與日常對話，共建構約 4,100 筆標註語料（`service_nlp/train/`，可由種子重現）。
+* **訓練**: 於本地 NVIDIA GPU 以 fp16 微調（HuggingFace `Trainer`，3 epochs），訓練腳本 `fine_tune.py`。
+* **評估（含誠實的泛化測試）**: 除同分布測試集外，另建立**手寫的分布外 (OOD) 真實風格測試集**（含「合法銀行/物流通知」等難負樣本）以檢驗真實泛化能力。詳見 §10.4。
 
 ```mermaid
 graph TD
@@ -418,6 +421,14 @@ flowchart TD
 
 #### 5.6.2 Redirect Chain Tracking
 針對惡意釣魚連結常見的層層跳轉 (Multi-hop redirects)，系統會自動追蹤跳轉鏈。預設超過 3 層跳轉即標記為「可疑 (Warning)」，超過 5 層或跳轉至私有 IP 則立即封鎖，防止利用跳轉隱藏最終釣魚頁面。
+
+### 5.7 LLM Explainability Layer (可解釋推理層)
+
+#### 5.7.1 Purpose
+為將系統從「黑盒分類器」升級為「推理透明的決策系統」，v3.0 新增 `service_explain` 服務 (Port 8004)。當偵測結果為高風險 (Danger) 時，Gateway 會彙整多引擎訊號（NLP 類別/信任分數、URL 風險、原始文字片段）轉發至此服務，由 **Claude API** 生成 100–120 字的繁體中文風險解釋，引用具體偵測訊號並給出行動建議。
+
+#### 5.7.2 Graceful Degradation
+此層具備**降級設計**：若環境未設定 `ANTHROPIC_API_KEY`，服務自動改用規則式 (deterministic) 解釋產生器，仍引用真實偵測訊號並附上 165 反詐騙專線建議，確保離線或無金鑰時 demo 仍可運作。解釋失敗亦不影響主要分析結果（非阻斷式）。
 
 ## Section 6 - Hardware Domain Design (硬體領域設計)
 
@@ -706,7 +717,7 @@ Sentinel-Core 採用標準化 RESTful API 架構，確保前端廣播插件與�
 ---
 
 ### 10.3 Test Case Classification (測試案例分類)
-系統針對不同維度執行了共計 **81 項自動化測試案例**，具體分布如下：
+系統針對不同維度執行了共計 **105 項自動化測試案例**，具體分布如下：
 
 | Test Category | Count | Description (測試重點) |
 | :--- | :--- | :--- |
@@ -714,6 +725,7 @@ Sentinel-Core 採用標準化 RESTful API 架構，確保前端廣播插件與�
 | **Boundary Conditions** | 20 | 測試極長文本、空字串及特殊不可見字元之邊界處理。 |
 | **Security Injection** | 15 | 驗證 XSS 實體轉義與 SQL 指令注入之過濾攔截成效。 |
 | **Concurrency & Load** | 11 | 模擬多個 Client 同時發起請求時，後端之非同步處理能力。 |
+| **AI / XAI Integration** | 24 | v3.0：fine-tuned 模型六類分類整合測試、LLM 解釋服務與高風險融合觸發邏輯。 |
 
 ---
 
@@ -722,16 +734,24 @@ Sentinel-Core 採用標準化 RESTful API 架構，確保前端廣播插件與�
 #### 10.4.1 Summary Metrics
 | Metric | Execution Result | Target |
 | :--- | :--- | :--- |
-| **Total Test Cases** | 81 | - |
+| **Total Test Cases** | 105 | - |
 | **Overall Pass Rate** | 100% | > 95% |
 | **System Failures** | 0 | 0 |
-| **Code Coverage** | 88.5% | > 80% |
 
-#### 10.4.2 Latency Validation (效能驗證)
-針對 **NFR-1 (Latency < 500ms)** 之壓力測試數據顯示：
-* **Average Response**: 342ms (包含網路傳遞、L1 過濾與 L2 推論)。
-* **99th Percentile (P99)**: 488ms (於高併發請求情境下)。
-* **Result**: 系統反應速度完全符合預期之非功能需求。
+#### 10.4.2 Model Classification Performance (L2 模型分類效能)
+fine-tuned 六類詐騙分類器之評估結果（`service_nlp/train/evaluate.py`，混淆矩陣見 `reports/`）：
+
+| 測試集 | 6 類 macro-F1 | 二元 (scam/safe) F1 — fine-tuned | 二元 F1 — baseline (情感星等) |
+| :--- | :--- | :--- | :--- |
+| 同分布 (in-distribution) | **0.998** | **1.000** | 0.818 |
+| 分布外 (OOD, 真實風格) | **0.865** | **0.894** | 0.750 |
+
+* **對比實驗**: fine-tuned 模型在兩個測試集上均**顯著優於** baseline（原情感星等換算法）。
+* **泛化分析（誠實揭露）**: 同分布近乎滿分反映模型能完整學習語料樣式；OOD 分數下降屬預期，反映真實世界泛化能力，且仍勝過 baseline。OOD 混淆矩陣顯示主要誤判來自口語化投資詐騙與「含金融關鍵字的合法通知」難負樣本，為後續改進方向。
+
+#### 10.4.3 Latency (效能目標)
+* **設計目標 (NFR-1)**: 端到端回應 < 500ms。L1 規則命中為毫秒級短路；L2 於本地 GPU 推論單句約數十毫秒。
+* **說明**: 高風險時額外觸發 LLM 解釋層會增加延遲，故採非阻斷式設計，主要分析結果先行回傳。
 
 
 
@@ -746,4 +766,4 @@ Sentinel-Core 採用標準化 RESTful API 架構，確保前端廣播插件與�
 ---
 
 ### 10.6 Conclusion (專案總結)
-**Sentinel-Core** 成功實作了基於 AI 雙引擎之網頁詐騙主動預警系統。透過「行為驅動」設計有效平衡了資安防護與系統負載，並藉由 BERT 模型補足了傳統規則引擎在語意理解上的缺陷。測試數據證明，本系統在效能、安全與穩定性上均已達到可交付之專業水準，具備作為次世代瀏覽器安全輔助工具之高度可行性。此外，v2.4 的架構重構成功克服了 Chrome Manifest V3 環境下的跨域存取限制，並透過 Service Worker 提升了通訊穩定性。新增的 SSRF 防護與連結掃描模組，標誌著本系統已具備從語意分析到網絡基礎設施層級的全方位資安偵測能力。
+**Sentinel-Core** 成功實作了基於 AI 多引擎之網頁詐騙主動預警系統。透過「行為驅動」設計有效平衡了資安防護與系統負載；v3.0 更將語意核心從通用情感模型升級為**針對台灣詐騙話術 fine-tune 的繁中六類分類器**，以對比實驗與分布外測試驗證其相對 baseline 的顯著提升，補足了傳統規則引擎在語意理解上的缺陷。新增的 **LLM 可解釋推理層** 則將系統由黑盒分類器提升為推理透明的決策系統。結合 v2.4 的 MV3 架構重構、SSRF 防護與連結掃描模組，本系統已具備從語意理解、可解釋推理到網絡基礎設施層級的全方位資安偵測能力。

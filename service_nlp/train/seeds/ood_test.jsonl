@@ -1,0 +1,33 @@
+{"text": "您好這是中國信託客服，您的信用卡剛在境外有一筆38000元交易，若非本人請立即點選簡訊內連結止付", "label": "phishing"}
+{"text": "[網銀通知] 因應金管會新規需重新實名認證，今日內未完成者帳戶功能將受限 reurl.cc/9aZk2", "label": "phishing"}
+{"text": "您的LINE Pay偵測到他人嘗試登入，為保資金安全請點此確認身分 https://line-pay-verify.com", "label": "phishing"}
+{"text": "親愛的用戶 您訂閱的iCloud即將到期 為避免資料遺失請更新付款 https://apple-id-pay.co", "label": "phishing"}
+{"text": "玉山銀行：偵測您門號綁定異動，若非本人操作請撥打0809-xxx-xxx由專員協助關閉", "label": "phishing"}
+{"text": "您的蝦皮帳戶涉及賣家詐騙申訴，需先驗證身分否則款項凍結，請加官方客服LINE:shopee_cs", "label": "phishing"}
+{"text": "哥跟你說個門路 我朋友在玩那個合約 一週本金多兩成 我截圖你看 要不要帶你進", "label": "investment_scam"}
+{"text": "本群限收10名學員 王老師親自指導 上週帶單當沖獲利23% 想學的扣1 我私你", "label": "investment_scam"}
+{"text": "現在加入會員儲值就送等值點數 平台跟外資合作 出金秒到 名額剩最後三位", "label": "investment_scam"}
+{"text": "姐 這個ETF穩的啦 我自己也壓了五十萬 一個月配息快兩萬 你要不要一起 群組我拉你", "label": "investment_scam"}
+{"text": "獨家AI機器人自動交易 設定好就躺著賺 月化30%起跳 想了解加賴聊", "label": "investment_scam"}
+{"text": "Honey 我這邊工程款被凍結 銀行說要先繳一筆手續費才能解 我身邊只剩你能幫我了", "label": "romance_scam"}
+{"text": "我下個月休假就飛去找你 但託運的行李箱裡有我的退休金 物流要先付保證金才肯寄", "label": "romance_scam"}
+{"text": "認識你雖然才一個月 但我覺得你就是對的人 我把我所有積蓄都想交給你保管可以嗎", "label": "romance_scam"}
+{"text": "親愛的 我在維和部隊任務結束想退役回台跟你結婚 但需要你幫我付一筆離境文件費", "label": "romance_scam"}
+{"text": "您的包裹因清關需補件 逾期將退運 詳情點 https://t.cn/A6xk 〔郵局〕", "label": "parcel_scam"}
+{"text": "親 您的訂單因系統異常被凍結 請點連結聯繫客服處理退款 否則商品將自動取消", "label": "parcel_scam"}
+{"text": "【物流通知】您有一件到付包裹待處理 運費39元未付無法派送 立即繳費 dhl-pay.info", "label": "parcel_scam"}
+{"text": "您的快遞地址辨識失敗 為免退回請於今日重新填寫收件資訊並核對手機 連結見下", "label": "parcel_scam"}
+{"text": "這裡是衛福部 您的紓困補助6000元尚未領取 請點連結填寫帳戶 逾期視同放棄", "label": "gov_impersonation"}
+{"text": "（警政署）您因涉及一件詐欺案件被列為關係人 請於今日聯繫承辦員警 案號113偵字第8845號", "label": "gov_impersonation"}
+{"text": "國稅局通知 您有一筆退稅2143元待領 請持金融卡至ATM依語音指示操作領取", "label": "gov_impersonation"}
+{"text": "您好我是地檢署書記官 您的帳戶疑似被詐團利用 為證明清白請配合提供存摺資料", "label": "gov_impersonation"}
+{"text": "【中國信託】您尾號1234信用卡4/15繳款2580元已成功入帳，謝謝您。", "label": "safe"}
+{"text": "您的蝦皮訂單已出貨，物流單號7xx，可於App查詢配送進度，謝謝購買。", "label": "safe"}
+{"text": "提醒您明天上午十點的視訊會議連結已寄到信箱，再請準時參加。", "label": "safe"}
+{"text": "媽我今晚不回家吃飯 跟同事約了 你們先吃別等我", "label": "safe"}
+{"text": "玉山銀行：您本期帳單已出帳，應繳3,210元，繳款期限4/20，可使用網銀或超商繳納。", "label": "safe"}
+{"text": "週五的讀書會改到圖書館三樓討論室 記得帶筆電 七點開始", "label": "safe"}
+{"text": "您預約的5/3門診已確認 看診序號18號 請提前15分鐘報到", "label": "safe"}
+{"text": "謝謝你昨天幫我顧店 這週末請你吃飯 你想吃日式還是火鍋", "label": "safe"}
+{"text": "中華電信:您4月份帳單金額為599元 已於今日完成自動扣繳 感謝您的使用", "label": "safe"}
+{"text": "明天颱風假確定停班停課 大家在家注意安全 報告下週再交沒關係", "label": "safe"}
