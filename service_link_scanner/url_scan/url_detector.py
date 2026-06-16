@@ -191,26 +191,31 @@ class URLDetector:
             "hop_count": hops,
         }
 
-    async def analyze_batch(self, urls: list[str]) -> list[dict]:
+    async def analyze_batch(self, urls: list[str], follow_redirects: bool = True) -> list[dict]:
         """
         並行追蹤重新導向後，將「原始 + 最終」URL 去重並批次送 GSB（必要時分多批 500）。
         回傳與 urls 同序的結果 dict 列表。
+
+        follow_redirects=False（輕量模式）：跳過逐一 redirect 追蹤（省去每條 URL 的
+        server 端 GET），僅以原始 URL 做 GSB + 啟發式，供整頁批次掃描降載。
         """
         if not urls:
             return []
 
-        redirects = await asyncio.gather(
-            *[self.get_final_url(u) for u in urls],
-            return_exceptions=True,
-        )
-
         pairs: list[tuple[str, str, int]] = []
-        for i, u in enumerate(urls):
-            r = redirects[i]
-            if isinstance(r, BaseException):
-                pairs.append((u, u, -1))
-            else:
-                pairs.append((u, r[0], r[1]))
+        if follow_redirects:
+            redirects = await asyncio.gather(
+                *[self.get_final_url(u) for u in urls],
+                return_exceptions=True,
+            )
+            for i, u in enumerate(urls):
+                r = redirects[i]
+                if isinstance(r, BaseException):
+                    pairs.append((u, u, -1))
+                else:
+                    pairs.append((u, r[0], r[1]))
+        else:
+            pairs = [(u, u, 0) for u in urls]
 
         to_check: list[str] = []
         seen: set[str] = set()

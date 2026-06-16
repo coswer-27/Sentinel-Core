@@ -57,11 +57,11 @@ async def health():
 
 
 @app.post("/analyze/links", response_model=BatchUrlResponse)
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 async def analyze_links(body: BatchUrlRequest, request: Request):
     url_detector: URLDetector = request.app.state.url_detector
     try:
-        rows = await url_detector.analyze_batch(body.urls)
+        rows = await url_detector.analyze_batch(body.urls, follow_redirects=body.follow_redirects)
     except Exception as e:
         logger.error("[Sentinel] analyze_batch 失敗: %s", e, exc_info=True)
         rows = [

@@ -1,5 +1,7 @@
+import asyncio
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "service_link_scanner"))
 
@@ -38,3 +40,17 @@ def test_row_from_scan_many_hops_flagged_suspicious():
     row = d._row_from_scan("https://a.com", "https://final.com", 5, set(), set())
     assert row["label"] == "Suspicious"
     assert row["hop_count"] == 5
+
+
+def test_analyze_batch_light_mode_skips_redirect_fetches():
+    """輕量模式：不逐一追蹤 redirect（省去每條 URL 的 server 端 GET）。"""
+    d = URLDetector()
+    d.check_google_safe_browsing_batch = AsyncMock(return_value=set())
+    d.get_final_url = AsyncMock()  # 輕量模式不應呼叫
+
+    rows = asyncio.run(d.analyze_batch(["https://example.com/path"], follow_redirects=False))
+
+    d.get_final_url.assert_not_called()
+    assert rows[0]["final_url"] == "https://example.com/path"
+    assert rows[0]["hop_count"] == 0
+    assert rows[0]["label"] == "Safe"
