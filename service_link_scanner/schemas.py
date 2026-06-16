@@ -8,6 +8,7 @@ class UrlScanResult(BaseModel):
     trust_score: int
     label: str
     reason: str
+    hop_count: int = -1
 
 
 class BatchUrlResponse(BaseModel):

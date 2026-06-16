@@ -165,6 +165,7 @@ class URLDetector:
                 "trust_score": 0,
                 "label": "Malicious",
                 "reason": "Google Safe Browsing 標記為惡意網站",
+                "hop_count": hops,
             }
         if is_suspicious:
             return {
@@ -172,6 +173,7 @@ class URLDetector:
                 "trust_score": 40,
                 "label": "Suspicious",
                 "reason": heuristic_reason,
+                "hop_count": hops,
             }
         if hops >= 0 and hops > 3:
             return {
@@ -179,12 +181,14 @@ class URLDetector:
                 "trust_score": 50,
                 "label": "Suspicious",
                 "reason": f"偵測到 {hops} 層重新導向，可能為追蹤連結",
+                "hop_count": hops,
             }
         return {
             "final_url": final_url,
             "trust_score": 90,
             "label": "Safe",
             "reason": "未發現已知威脅",
+            "hop_count": hops,
         }
 
     async def analyze_batch(self, urls: list[str]) -> list[dict]:

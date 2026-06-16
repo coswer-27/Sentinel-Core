@@ -24,3 +24,17 @@ def test_heuristic_safe():
     d = URLDetector()
     ok, _ = d.heuristic_check("https://www.google.com/")
     assert ok is False
+
+
+def test_row_from_scan_includes_hop_count_safe():
+    d = URLDetector()
+    row = d._row_from_scan("https://a.com", "https://a.com", 2, set(), set())
+    assert row["label"] == "Safe"
+    assert row["hop_count"] == 2
+
+
+def test_row_from_scan_many_hops_flagged_suspicious():
+    d = URLDetector()
+    row = d._row_from_scan("https://a.com", "https://final.com", 5, set(), set())
+    assert row["label"] == "Suspicious"
+    assert row["hop_count"] == 5
