@@ -189,7 +189,7 @@ async def gateway(request: Request, body: AnalyzeRequest, background_tasks: Back
         raise HTTPException(status_code=500, detail="內部錯誤")
 
 @app.post("/analyze/links")
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 async def gateway_analyze_links(request: Request, body: BatchUrlRequest, background_tasks: BackgroundTasks):
     logger.info("[Gateway] 收到連結掃描請求 - 共 %d 個 URL", len(body.urls))
     try:
@@ -227,7 +227,7 @@ async def gateway_analyze_links(request: Request, body: BatchUrlRequest, backgro
         raise HTTPException(status_code=500, detail="內部錯誤")
 
 @app.post("/analyze/behavior")
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 async def gateway_analyze_behavior(request: Request, body: BehaviorRequest, background_tasks: BackgroundTasks):
     """
     v3.1 頁面行為偵測 + 多引擎融合：
@@ -244,7 +244,7 @@ async def gateway_analyze_behavior(request: Request, body: BehaviorRequest, back
     if page_url:
         try:
             resp = await request.app.state.http_client.post(
-                URL_SERVICE_URL, json={"urls": [page_url]}
+                URL_SERVICE_URL, json={"urls": [page_url], "follow_redirects": False}
             )
             resp.raise_for_status()
             r = (resp.json().get("results") or [None])[0]

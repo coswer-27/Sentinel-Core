@@ -57,6 +57,8 @@ class AnalyzeRequest(BaseModel):
 
 class BatchUrlRequest(BaseModel):
     urls: List[str] = Field(..., min_length=1, max_length=100)
+    # False = 輕量模式：跳過 server 端 redirect 追蹤（僅 GSB + 啟發式），供整頁批次掃描降載
+    follow_redirects: bool = True
 
     @field_validator("urls")
     @classmethod

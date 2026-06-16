@@ -365,6 +365,42 @@ function isAllowlisted(href) {
     });
 }
 
+// --- 跨頁/跨分頁掃描快取（storage.local + TTL）---
+const SC_CACHE_KEY = "sc_scan_cache";
+const SC_CACHE_TTL = 30 * 60 * 1000;   // 30 分鐘
+const SC_CACHE_MAX = 600;              // 上限筆數，超過淘汰最舊
+
+function scCacheLoad() {
+    return new Promise((res) => {
+        try {
+            chrome.storage.local.get({ [SC_CACHE_KEY]: {} }, (o) => res((o && o[SC_CACHE_KEY]) || {}));
+        } catch {
+            res({});
+        }
+    });
+}
+
+async function scCacheGet(url) {
+    const c = await scCacheLoad();
+    const e = c[url];
+    return e && Date.now() - e.t < SC_CACHE_TTL ? e.r : null;
+}
+
+async function scCachePutMany(results) {
+    if (!results || !results.length) return;
+    const c = await scCacheLoad();
+    const now = Date.now();
+    for (const r of results) if (r && r.url) c[r.url] = { r, t: now };
+    const fresh = Object.entries(c).filter(([, v]) => now - v.t < SC_CACHE_TTL);
+    fresh.sort((a, b) => b[1].t - a[1].t);
+    const capped = Object.fromEntries(fresh.slice(0, SC_CACHE_MAX));
+    try {
+        chrome.storage.local.set({ [SC_CACHE_KEY]: capped });
+    } catch {
+        /* 配額/環境問題時忽略 */
+    }
+}
+
 // --- 1. 監聽選取事件 ---
 document.addEventListener('mouseup', function() {
     if (!_scEnabled) return;
@@ -616,6 +652,12 @@ function showSCTooltipForEl(anchorEl) {
     const text = anchorEl.getAttribute("data-sc-toast");
     if (!text) { hideSCTooltip(); return; }
     const status = anchorEl.getAttribute("data-sc-status") || "default";
+    // hover 當下才補上外框：整頁預掃不畫安全綠框（避免雜訊），但實際滑到時顯示，
+    // 與原本 hover 掃描體驗一致。（可疑/惡意已於預掃時畫框，這裡再次套用為冪等。）
+    if (status === "safe" || status === "suspicious" || status === "malicious") {
+        ensureScanStyles();
+        anchorEl.classList.add(`sc-flagged-${status}`);
+    }
     const result = scannedResults.get(anchorEl.href);
     const meta = result ? { finalUrl: result.final_url, hopCount: result.hop_count } : null;
     showSCTooltip(anchorEl, text, status, anchorEl.href || "", false, meta);
@@ -709,6 +751,17 @@ async function scanOnHover(anchorEl) {
 
     showSCTooltip(anchorEl, "Sentinel 掃描中…", "scanning", href, true);
 
+    // L2 快取（跨頁/跨分頁）命中 → 免後端
+    const cached = await scCacheGet(href);
+    if (cached) {
+        scannedResults.set(href, cached);
+        injectWarningUI(anchorEl, cached);
+        if (document.documentElement.contains(anchorEl)) showSCTooltipForEl(anchorEl);
+        else hideSCTooltip();
+        pendingScans.delete(href);
+        return;
+    }
+
     try {
         const data = await sentinelBackendFetch(`${BACKEND_URL}/analyze/links`, {
             method: "POST",
@@ -718,6 +771,7 @@ async function scanOnHover(anchorEl) {
         const result = data.results[0];
         if (result) {
             scannedResults.set(result.url, result);
+            scCachePutMany([result]);
             injectWarningUI(anchorEl, result);
             if (document.documentElement.contains(anchorEl)) {
                 showSCTooltipForEl(anchorEl);
@@ -728,9 +782,14 @@ async function scanOnHover(anchorEl) {
             hideSCTooltip();
         }
     } catch (err) {
-        showSCTooltip(anchorEl, "掃描失敗，後端無法連線", "malicious", "", false);
-        scannedUrls.delete(href);
-        setTimeout(() => hideSCTooltip(), 3000);
+        const msg = String((err && err.message) || err);
+        scannedUrls.delete(href);   // 允許稍後重試
+        if (msg.includes("429")) {
+            hideSCTooltip();        // 限流屬暫時性，不顯示錯誤
+        } else {
+            showSCTooltip(anchorEl, "掃描失敗，後端無法連線", "malicious", "", false);
+            setTimeout(() => hideSCTooltip(), 3000);
+        }
     } finally {
         pendingScans.delete(href);
     }
@@ -1041,31 +1100,41 @@ async function assessPageBehavior() {
 
     const features = extractBehaviorFeatures();
     const anchorMap = _scCollectPageLinks(40);   // 上限 40（外部優先，含同網域）
-    const linkUrls = [...anchorMap.keys()];
     scShowScanPill();  // loading 提示
+
+    // 先套用快取，只有未快取的連結才送後端（輕量模式：不追 redirect）
+    const cacheObj = await scCacheLoad();
+    const nowTs = Date.now();
+    const cachedResults = [];
+    const uncachedUrls = [];
+    for (const u of anchorMap.keys()) {
+        const e = cacheObj[u];
+        if (e && nowTs - e.t < SC_CACHE_TTL) cachedResults.push(e.r);
+        else uncachedUrls.push(u);
+    }
 
     const [behaviorR, linksR] = await Promise.allSettled([
         sentinelBackendFetch(`${BACKEND_URL}/analyze/behavior`, {
             method: "POST",
             body: { url: getSanitizedURL(), features },
         }),
-        linkUrls.length
+        uncachedUrls.length
             ? sentinelBackendFetch(`${BACKEND_URL}/analyze/links`, {
                   method: "POST",
-                  body: { urls: linkUrls },
+                  body: { urls: uncachedUrls, follow_redirects: false },
               })
             : Promise.resolve(null),
     ]);
 
     const behavior = behaviorR.status === "fulfilled" ? behaviorR.value : null;
     const linkData = linksR.status === "fulfilled" ? linksR.value : null;
+    const fetched = linkData && linkData.results ? linkData.results : [];
+    if (fetched.length) scCachePutMany(fetched);
 
-    if (!behavior && !linkData) { scHideScanPill(); return; }  // 後端離線 → 靜默
+    // 後端完全無回應且無快取可用 → 靜默
+    if (!behavior && !linkData && cachedResults.length === 0) { scHideScanPill(); return; }
 
-    const counts = linkData
-        ? _scApplyLinkResults(linkData.results, anchorMap)
-        : { malicious: 0, suspicious: 0 };
-
+    const counts = _scApplyLinkResults(cachedResults.concat(fetched), anchorMap);
     _scPresentPageResult(behavior, counts);
 }
 
