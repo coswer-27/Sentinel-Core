@@ -211,6 +211,29 @@ function scStyleSheet() {
     @keyframes sc-fall { to { transform: translateY(8px); opacity: 0; } }
     @keyframes sc-spin { to { transform: rotate(360deg); } }
 
+    /* ---- 頁面安全掃描 loading / 結果 pill ---- */
+    .sc-pill {
+        --tone: ${SC_PALETTE.scanning.base};
+        --tone-soft: ${SC_PALETTE.scanning.soft};
+        display: inline-flex; align-items: center; gap: 9px;
+        max-width: min(320px, calc(100vw - 32px));
+        background: #ffffff; color: #1f2937;
+        border-radius: 999px; padding: 7px 15px 7px 8px;
+        border: 1px solid rgba(15,23,42,0.06);
+        box-shadow: 0 1px 2px rgba(15,23,42,0.06), 0 8px 20px -8px rgba(15,23,42,0.22);
+        font-size: 12.5px; font-weight: 600; letter-spacing: -0.005em;
+        pointer-events: none; opacity: 0; transform: translateY(8px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+    .sc-pill.visible { opacity: 1; transform: translateY(0); }
+    .sc-pill-ic {
+        flex: 0 0 auto; width: 24px; height: 24px; border-radius: 8px;
+        display: grid; place-items: center; background: var(--tone-soft); color: var(--tone);
+    }
+    .sc-pill-ic svg { width: 15px; height: 15px; }
+    .sc-pill-ic.spin svg { animation: sc-spin 1.1s linear infinite; }
+    .sc-pill-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
     /* ---- link hover tooltip ---- */
     .sc-tip {
         position: fixed; max-width: 290px;
@@ -785,14 +808,273 @@ const debouncedObserve = debounce(() => {
     });
 }, 800);
 
-const observer = new MutationObserver(() => {
+// 載入後動態注入的 <script> 計數（行為偵測訊號之一）
+let _scDynamicScripts = 0;
+
+const observer = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+        for (const n of m.addedNodes) {
+            if (n.nodeName === "SCRIPT") _scDynamicScripts++;
+        }
+    }
     debouncedObserve();
 });
+
+// =====================================================================
+//  方向 4：頁面行為異常偵測（DOM 啟發式）+ 融合評分
+// =====================================================================
+
+function _scDetectTransparentOverlay() {
+    try {
+        const cx = Math.floor(window.innerWidth / 2);
+        const cy = Math.floor(window.innerHeight / 2);
+        const el = document.elementFromPoint(cx, cy);
+        if (!el || el === document.body || el === document.documentElement) return false;
+        const r = el.getBoundingClientRect();
+        const coversMost =
+            r.width >= window.innerWidth * 0.85 && r.height >= window.innerHeight * 0.85;
+        if (!coversMost) return false;
+        const cs = getComputedStyle(el);
+        const z = parseInt(cs.zIndex, 10);
+        const opacity = parseFloat(cs.opacity);
+        const transparentBg =
+            cs.backgroundColor === "rgba(0, 0, 0, 0)" || cs.backgroundColor === "transparent";
+        const highZ = Number.isFinite(z) && z >= 1000;
+        const positioned = cs.position === "fixed" || cs.position === "absolute";
+        return opacity < 0.2 || (transparentBg && highZ && positioned);
+    } catch {
+        return false;
+    }
+}
+
+function _scDetectObfuscatedScript() {
+    const scripts = document.querySelectorAll("script:not([src])");
+    for (const s of scripts) {
+        const t = s.textContent || "";
+        if (t.length < 200) continue;
+        const hexEsc = (t.match(/\\x[0-9a-f]{2}/gi) || []).length;
+        const longB64 = /[A-Za-z0-9+/]{120,}={0,2}/.test(t);
+        const evalAtob =
+            /\b(eval|atob|unescape|Function)\s*\(/.test(t) && /[A-Za-z0-9+/]{60,}/.test(t);
+        if (hexEsc > 20 || longB64 || evalAtob) return true;
+    }
+    return false;
+}
+
+function extractBehaviorFeatures() {
+    const host = location.hostname.toLowerCase();
+    const forms = Array.from(document.querySelectorAll("form"));
+    let formActionExternal = false;
+    let externalPasswordForm = false;
+    for (const f of forms) {
+        const action = f.getAttribute("action") || "";
+        let actionHost = "";
+        try {
+            actionHost = action ? new URL(action, location.href).hostname.toLowerCase() : "";
+        } catch {
+            actionHost = "";
+        }
+        const external = actionHost && actionHost !== host;
+        if (external) {
+            formActionExternal = true;
+            if (f.querySelector('input[type="password"]')) externalPasswordForm = true;
+        }
+    }
+
+    const iframes = Array.from(document.querySelectorAll("iframe[src]"));
+    let crossOriginIframes = 0;
+    for (const fr of iframes) {
+        try {
+            const h = new URL(fr.src, location.href).hostname.toLowerCase();
+            if (h && h !== host) crossOriginIframes++;
+        } catch {
+            /* ignore */
+        }
+    }
+
+    return {
+        password_field_count: document.querySelectorAll('input[type="password"]').length,
+        external_password_form: externalPasswordForm,
+        form_action_external: formActionExternal,
+        hidden_input_count: document.querySelectorAll('input[type="hidden"]').length,
+        iframe_count: iframes.length,
+        cross_origin_iframe_count: crossOriginIframes,
+        transparent_overlay: _scDetectTransparentOverlay(),
+        obfuscated_script: _scDetectObfuscatedScript(),
+        dynamic_script_inject: _scDynamicScripts,
+        suspicious_tld: /\.(top|xyz|tk|pw|gq|cf|ml)$/.test(host),
+    };
+}
+
+// --- 頁面安全掃描 loading / 結果 pill ---
+let _scPillEl = null;
+let _scPillTimer = null;
+
+function _scEnsurePill() {
+    scOverlay();
+    if (!_scPillEl) {
+        _scPillEl = document.createElement("div");
+        _scPillEl.className = "sc-pill";
+        _scToastStack.appendChild(_scPillEl);  // 併入右下角堆疊，避免與 toast 重疊
+    }
+    if (_scPillTimer) { clearTimeout(_scPillTimer); _scPillTimer = null; }
+    return _scPillEl;
+}
+
+function scShowScanPill() {
+    const pill = _scEnsurePill();
+    const pal = SC_PALETTE.scanning;
+    pill.style.setProperty("--tone", pal.base);
+    pill.style.setProperty("--tone-soft", pal.soft);
+    pill.innerHTML = `<span class="sc-pill-ic spin">${SC_ICON.spinner}</span><span class="sc-pill-text">掃描本頁安全性…</span>`;
+    requestAnimationFrame(() => pill.classList.add("visible"));
+}
+
+function scResolveScanPill(tone, iconKey, text, autoHideMs) {
+    const pill = _scEnsurePill();
+    const pal = SC_PALETTE[tone] || SC_PALETTE.neutral;
+    pill.style.setProperty("--tone", pal.base);
+    pill.style.setProperty("--tone-soft", pal.soft);
+    pill.innerHTML = `<span class="sc-pill-ic">${SC_ICON[iconKey]}</span><span class="sc-pill-text">${escapeHTML(text)}</span>`;
+    pill.classList.add("visible");
+    if (autoHideMs) _scPillTimer = setTimeout(scHideScanPill, autoHideMs);
+}
+
+function scHideScanPill() {
+    if (_scPillTimer) { clearTimeout(_scPillTimer); _scPillTimer = null; }
+    if (_scPillEl) _scPillEl.classList.remove("visible");
+}
+
+// 蒐集頁面連結（去重、排除白名單與已掃過）→ Map<href, anchor[]>
+// 外部連結優先，再補同網域，合併到上限（同網域也要掃：被入侵站點/測試站的惡意連結常為同網域路徑）。
+function _scCollectPageLinks(cap) {
+    const host = location.hostname.toLowerCase();
+    const ext = new Map();
+    const same = new Map();
+    for (const a of extractPageLinks()) {
+        let href = "";
+        try { href = a.href; } catch { continue; }
+        if (!href || !/^https?:/i.test(href)) continue;
+        const h = hostOf(href);
+        if (!h) continue;
+        if (isAllowlisted(href) || scannedUrls.has(href)) continue;
+        const bucket = h === host ? same : ext;
+        if (!bucket.has(href)) bucket.set(href, []);
+        bucket.get(href).push(a);
+    }
+    const map = new Map();
+    for (const src of [ext, same]) {          // 外部優先
+        for (const [href, anchors] of src) {
+            if (map.size >= cap) break;
+            map.set(href, anchors);
+        }
+        if (map.size >= cap) break;
+    }
+    return map;
+}
+
+// 套用批次連結掃描結果：快取 + 預先標記（安全連結不加外框，避免整頁雜訊）
+function _scApplyLinkResults(results, anchorMap) {
+    let malicious = 0;
+    let suspicious = 0;
+    for (const r of results || []) {
+        if (!r || !r.url) continue;
+        scannedUrls.add(r.url);
+        scannedResults.set(r.url, r);
+        if (r.label === "Malicious") malicious++;
+        else if (r.label === "Suspicious") suspicious++;
+        for (const a of (anchorMap.get(r.url) || [])) {
+            if (r.label === "Safe") {
+                injectLinkToast(a, "safe", "安全：未發現已知威脅");  // 僅快取，hover 可見，不加外框
+            } else {
+                injectWarningUI(a, r);   // 可疑/惡意 → 外框徽記 + 啟用點擊攔截
+            }
+        }
+    }
+    return { malicious, suspicious };
+}
+
+// 合併「行為/頁面URL」與「連結」結果 → 呈現 pill 或警告卡
+function _scPresentPageResult(behavior, counts) {
+    const behaviorDanger = behavior && behavior.label === "Danger";
+    const behaviorSuspicious = behavior && behavior.label === "Suspicious";
+    const { malicious, suspicious } = counts;
+
+    if (behaviorDanger || malicious > 0) {
+        scHideScanPill();
+        let reason = "";
+        if (behaviorDanger) {
+            const flags = behavior.behavior_flags || [];
+            reason = flags.length ? flags.join("、") + "。" : "此頁面偵測到可疑的行為特徵。";
+            if (behavior.url && behavior.url.label === "Malicious") {
+                reason += " 此頁網址亦被標記為惡意。";
+            }
+        }
+        if (malicious > 0) {
+            reason += (reason ? " " : "") + `本頁含 ${malicious} 個惡意連結，請勿點擊。`;
+        }
+        const explanation = behaviorDanger ? behavior.explanation : null;
+        const trust = behaviorDanger ? behavior.trust_score : 0;
+        showSafetyNotification(reason, trust, "", "malicious", "shieldAlert", "本頁面高風險", explanation);
+        return;
+    }
+
+    if (behaviorSuspicious || suspicious > 0) {
+        let txt;
+        if (suspicious > 0 && !behaviorSuspicious) txt = `本頁含 ${suspicious} 個可疑連結`;
+        else if (suspicious > 0) txt = `本頁有可疑特徵，含 ${suspicious} 個可疑連結`;
+        else txt = "本頁面有可疑特徵";
+        scResolveScanPill("suspicious", "alertTriangle", txt, 5000);
+        return;
+    }
+
+    scResolveScanPill("safe", "shieldCheck", "本頁面未發現風險", 2500);
+}
+
+let _scPageAssessed = false;
+async function assessPageBehavior() {
+    if (!_scEnabled || _scPageAssessed) return;
+    if (!/^https?:/i.test(location.href)) return;
+    if (/^https?:\/\/(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/i.test(location.href)) return;
+    if (isAllowlisted(location.href)) return;
+    _scPageAssessed = true;
+
+    const features = extractBehaviorFeatures();
+    const anchorMap = _scCollectPageLinks(40);   // 上限 40（外部優先，含同網域）
+    const linkUrls = [...anchorMap.keys()];
+    scShowScanPill();  // loading 提示
+
+    const [behaviorR, linksR] = await Promise.allSettled([
+        sentinelBackendFetch(`${BACKEND_URL}/analyze/behavior`, {
+            method: "POST",
+            body: { url: getSanitizedURL(), features },
+        }),
+        linkUrls.length
+            ? sentinelBackendFetch(`${BACKEND_URL}/analyze/links`, {
+                  method: "POST",
+                  body: { urls: linkUrls },
+              })
+            : Promise.resolve(null),
+    ]);
+
+    const behavior = behaviorR.status === "fulfilled" ? behaviorR.value : null;
+    const linkData = linksR.status === "fulfilled" ? linksR.value : null;
+
+    if (!behavior && !linkData) { scHideScanPill(); return; }  // 後端離線 → 靜默
+
+    const counts = linkData
+        ? _scApplyLinkResults(linkData.results, anchorMap)
+        : { malicious: 0, suspicious: 0 };
+
+    _scPresentPageResult(behavior, counts);
+}
 
 function bootSentinelLinkScanner() {
     initSentinelLinkToasts();
     initSentinelClickGuard();
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["href"] });
+    // 延遲評估，讓動態內容/腳本先載入
+    setTimeout(assessPageBehavior, 1800);
 }
 
 if (document.readyState === "loading") {

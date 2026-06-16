@@ -26,12 +26,13 @@ async def safe_log_scan(*args, **kwargs):
     except Exception as e:
         logger.error("[Gateway] 背景記錄日誌失敗: %s", e)
 from rules_engine import engine
+from behavior_engine import score_behavior, fuse
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from common.models import AnalyzeRequest, BatchUrlRequest
+from common.models import AnalyzeRequest, BatchUrlRequest, BehaviorRequest
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -224,6 +225,81 @@ async def gateway_analyze_links(request: Request, body: BatchUrlRequest, backgro
     except Exception as e:
         logger.exception("[Gateway] 未預期錯誤: %s", e)
         raise HTTPException(status_code=500, detail="內部錯誤")
+
+@app.post("/analyze/behavior")
+@limiter.limit("30/minute")
+async def gateway_analyze_behavior(request: Request, body: BehaviorRequest, background_tasks: BackgroundTasks):
+    """
+    v3.1 頁面行為偵測 + 多引擎融合：
+    行為規則評分 → （可選）掃描頁面 URL → 融合 → Danger 時呼叫 explain 並記錄。
+    """
+    feats = body.features.model_dump()
+    beh = score_behavior(feats)
+    page_url = str(body.url) if body.url else None
+    logger.info("[Gateway] 行為分析 - URL: %s, 行為分數: %s", page_url, beh["score"])
+
+    url_trust = None
+    url_label = None
+    url_info = None
+    if page_url:
+        try:
+            resp = await request.app.state.http_client.post(
+                URL_SERVICE_URL, json={"urls": [page_url]}
+            )
+            resp.raise_for_status()
+            r = (resp.json().get("results") or [None])[0]
+            if r:
+                url_trust = r.get("trust_score")
+                url_label = r.get("label")
+                url_info = {
+                    "label": url_label,
+                    "final_url": r.get("final_url"),
+                    "hop_count": r.get("hop_count"),
+                }
+        except Exception as e:
+            logger.warning("[Gateway] 行為分析的 URL 掃描失敗，改為僅行為評分: %s", e)
+
+    fusion = fuse(beh["score"], url_trust, url_label, critical=beh["critical"])
+    result = {
+        "behavior_score": beh["score"],
+        "behavior_flags": beh["flags"],
+        "url": url_info,
+        "fusion_score": fusion["fusion_score"],
+        "trust_score": fusion["trust_score"],
+        "label": fusion["label"],
+    }
+
+    if fusion["label"] == "Danger":
+        # 可解釋層（service_explain 的 ExplainRequest 已支援 behavior 欄位）
+        payload = {"behavior": {"score": beh["score"], "flags": beh["flags"]}}
+        if url_info:
+            payload["url"] = {
+                "label": url_info.get("label"),
+                "final_url": url_info.get("final_url"),
+                "hop_count": url_info.get("hop_count"),
+            }
+        try:
+            eresp = await request.app.state.http_client.post(EXPLAIN_URL, json=payload)
+            eresp.raise_for_status()
+            exp = eresp.json()
+            result["explanation"] = exp.get("explanation")
+            result["explanation_source"] = exp.get("source")
+        except Exception as e:
+            logger.warning("[Gateway] 行為分析解釋呼叫失敗，略過: %s", e)
+
+        # 記錄高風險頁面（併入 popup 近期掃描/統計）
+        reason = "、".join(beh["flags"]) or "頁面行為異常"
+        background_tasks.add_task(
+            safe_log_scan,
+            content=f"[頁面行為] {page_url or ''}",
+            url=page_url,
+            score=fusion["trust_score"],
+            label="Danger",
+            reason=reason,
+            ts=datetime.now(timezone.utc).isoformat(),
+        )
+
+    return result
 
 @app.get("/recent")
 async def get_recent(limit: int = 8):

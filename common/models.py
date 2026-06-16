@@ -66,3 +66,40 @@ class BatchUrlRequest(BaseModel):
                 raise ValueError("urls 中不可包含空字串")
             assert_public_http_url(url.strip())
         return v
+
+
+class BehaviorFeatures(BaseModel):
+    """頁面行為特徵（由 content.js 以 DOM 啟發式擷取）。"""
+    password_field_count: int = Field(0, ge=0, le=1000)
+    external_password_form: bool = False
+    form_action_external: bool = False
+    hidden_input_count: int = Field(0, ge=0, le=10000)
+    iframe_count: int = Field(0, ge=0, le=10000)
+    cross_origin_iframe_count: int = Field(0, ge=0, le=10000)
+    transparent_overlay: bool = False
+    obfuscated_script: bool = False
+    dynamic_script_inject: int = Field(0, ge=0, le=100000)
+    suspicious_tld: bool = False
+
+
+class BehaviorRequest(BaseModel):
+    url: Optional[HttpUrl] = None
+    features: BehaviorFeatures
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, v: Optional[HttpUrl]) -> Optional[str]:
+        if v is None:
+            return None
+        url_str = str(v)
+        private_patterns = [
+            r"^https?://localhost",
+            r"^https?://127\.",
+            r"^https?://192\.168\.",
+            r"^https?://10\.",
+            r"^https?://172\.(1[6-9]|2[0-9]|3[0-1])\.",
+        ]
+        for pattern in private_patterns:
+            if re.match(pattern, url_str):
+                raise ValueError("不允許私有網路 URL")
+        return url_str.replace("\r", "").replace("\n", "")
