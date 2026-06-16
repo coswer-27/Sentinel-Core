@@ -250,3 +250,104 @@ def test_get_stats_db_error(gateway_client):
         response = gateway_client.get("/stats")
         assert response.status_code == 500
         assert response.json()["detail"] == "無法讀取統計數據"
+
+
+# ---------------------------------------------------------------------------
+# Recent scans endpoint
+# ---------------------------------------------------------------------------
+
+def test_get_recent_success(gateway_client):
+    rows = [
+        {"content": "您的帳戶異常請點連結驗證", "url": "https://x.test",
+         "trust_score": 8, "label": "Danger", "reason": "釣魚",
+         "created_at": "2026-06-17 03:00:00"},
+        {"content": "明天三點開會", "url": None,
+         "trust_score": 95, "label": "Safe", "reason": "安全",
+         "created_at": "2026-06-17 02:00:00"},
+    ]
+    with patch("aiosqlite.connect") as mock_connect:
+        mock_db = AsyncMock()
+        mock_connect.return_value.__aenter__.return_value = mock_db
+        mock_cursor = AsyncMock()
+        mock_db.execute.return_value = mock_cursor
+        mock_cursor.__aenter__.return_value = mock_cursor
+        mock_cursor.fetchall.return_value = rows
+
+        response = gateway_client.get("/recent?limit=6")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["items"]) == 2
+        assert data["items"][0]["label"] == "Danger"
+        assert data["items"][0]["trust_score"] == 8
+
+
+def test_get_recent_truncates_content(gateway_client):
+    long_content = "詐" * 200
+    rows = [{"content": long_content, "url": None, "trust_score": 5,
+             "label": "Danger", "reason": "x", "created_at": "2026-06-17 03:00:00"}]
+    with patch("aiosqlite.connect") as mock_connect:
+        mock_db = AsyncMock()
+        mock_connect.return_value.__aenter__.return_value = mock_db
+        mock_cursor = AsyncMock()
+        mock_db.execute.return_value = mock_cursor
+        mock_cursor.__aenter__.return_value = mock_cursor
+        mock_cursor.fetchall.return_value = rows
+
+        response = gateway_client.get("/recent")
+        assert response.status_code == 200
+        assert len(response.json()["items"][0]["content"]) == 80
+
+
+def test_get_recent_empty(gateway_client):
+    with patch("aiosqlite.connect") as mock_connect:
+        mock_db = AsyncMock()
+        mock_connect.return_value.__aenter__.return_value = mock_db
+        mock_cursor = AsyncMock()
+        mock_db.execute.return_value = mock_cursor
+        mock_cursor.__aenter__.return_value = mock_cursor
+        mock_cursor.fetchall.return_value = []
+
+        response = gateway_client.get("/recent")
+        assert response.status_code == 200
+        assert response.json() == {"items": []}
+
+
+def test_get_recent_db_error(gateway_client):
+    with patch("aiosqlite.connect", side_effect=Exception("DB Error")):
+        response = gateway_client.get("/recent")
+        assert response.status_code == 500
+        assert response.json()["detail"] == "無法讀取近期掃描"
+
+
+# ---------------------------------------------------------------------------
+# Link scan forwarding + logging
+# ---------------------------------------------------------------------------
+
+def test_analyze_links_forwards_results(gateway_client):
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {
+        "results": [
+            {"url": "https://evil.test", "final_url": "https://evil.test",
+             "trust_score": 0, "label": "Malicious", "reason": "GSB", "hop_count": 0},
+            {"url": "https://ok.test", "final_url": "https://ok.test",
+             "trust_score": 90, "label": "Safe", "reason": "ok", "hop_count": 0},
+        ]
+    }
+    gateway_client.app.state.http_client.post = AsyncMock(return_value=mock_resp)
+    response = gateway_client.post(
+        "/analyze/links", json={"urls": ["https://evil.test", "https://ok.test"]}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["results"]) == 2
+    assert data["results"][0]["label"] == "Malicious"
+    assert data["results"][0]["hop_count"] == 0
+
+
+def test_analyze_links_upstream_offline_returns_503(gateway_client):
+    gateway_client.app.state.http_client.post = AsyncMock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+    response = gateway_client.post("/analyze/links", json={"urls": ["https://x.test"]})
+    assert response.status_code == 503

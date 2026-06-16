@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sentinel-Core</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="app">
+        <!-- 品牌主控台 header -->
+        <header class="hero">
+            <div class="hero-glow" aria-hidden="true"></div>
+            <div class="brand">
+                <span class="brand-mark" id="brand-mark">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3l7 3v5c0 4.4-3 7.2-7 8.7-4-1.5-7-4.3-7-8.7V6l7-3z"/>
+                        <path d="M9 12l2 2 4-4"/>
+                    </svg>
+                </span>
+                <div class="brand-text">
+                    <h1>Sentinel<span>Core</span></h1>
+                    <p>即時詐騙與惡意連結防護</p>
+                </div>
+            </div>
+            <div class="status-pill" id="status-pill" data-state="checking">
+                <span class="status-dot"></span>
+                <span class="status-label" id="status-label">連線檢查中…</span>
+            </div>
+        </header>
+
+        <main class="body">
+            <!-- 防護開關 -->
+            <section class="card toggle-card reveal" style="--d:1">
+                <div class="toggle-info">
+                    <div class="toggle-title">即時防護</div>
+                    <div class="toggle-desc" id="toggle-desc">選取文字與滑過連結時自動偵測</div>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="protection-toggle" checked>
+                    <span class="slider"></span>
+                </label>
+            </section>
+
+            <!-- 統計 -->
+            <section class="stats reveal" style="--d:2">
+                <div class="stat">
+                    <div class="stat-label">累計掃描</div>
+                    <div class="stat-value" id="stat-total">—</div>
+                    <div class="stat-unit">次</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">平均信任分數</div>
+                    <div class="stat-value" id="stat-avg">—</div>
+                    <div class="stat-meter"><div class="stat-meter-fill" id="stat-avg-fill"></div></div>
+                </div>
+            </section>
+
+            <!-- 近期掃描 -->
+            <section class="card recent-card reveal" style="--d:3">
+                <div class="recent-head">
+                    <span class="service-head">近期掃描</span>
+                </div>
+                <ul class="recent-list" id="recent-list">
+                    <li class="recent-empty" id="recent-empty">尚無掃描紀錄</li>
+                </ul>
+            </section>
+
+            <!-- 受信任網域白名單 -->
+            <section class="card allow-card reveal" style="--d:4">
+                <div class="service-head">受信任網域</div>
+                <div class="allow-input-row">
+                    <input type="text" id="allow-input" class="allow-input" placeholder="例如 example.com" autocomplete="off" spellcheck="false">
+                    <button id="allow-add" class="allow-add" type="button">加入</button>
+                </div>
+                <div class="allow-list" id="allow-list"></div>
+                <div class="allow-empty" id="allow-empty">尚未加入信任網域；這些網域不會被掃描或攔截。</div>
+            </section>
+
+            <!-- 服務狀態明細 -->
+            <section class="card service-card reveal" style="--d:5">
+                <div class="service-head">後端服務</div>
+                <div class="service-row">
+                    <span class="svc-name">API Gateway</span>
+                    <span class="svc-meta" id="svc-gateway">：8000</span>
+                </div>
+                <div class="service-hint" id="service-hint">透過本機服務分析，內容不會離開你的電腦。</div>
+            </section>
+        </main>
+
+        <footer class="foot reveal" style="--d:6">
+            <span>Sentinel-Core</span>
+            <span class="foot-ver">v3.0</span>
+        </footer>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
