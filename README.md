@@ -1,184 +1,145 @@
-# 🛡️ Sentinel-Core: AI-Powered Security Shield
+# 🛡️ Sentinel-Core AI 混合安全引擎 (AI Hybrid Security Engine)
 
-Sentinel-Core 是一個基於微服務架構的資安防護工具，結合 **BERT 深度學習** 與 **高效規則引擎**，即時偵測網頁中的詐騙資訊、惡意內容與釣魚網域。
+![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-00a393.svg)
+![Transformers](https://img.shields.io/badge/HuggingFace-Transformers-orange.svg)
+![SQLite](https://img.shields.io/badge/Database-SQLite%20(WAL)-blue.svg)
+![Security](https://img.shields.io/badge/Security-JWT%20%7C%20API%20Key-red.svg)
 
----
-
-## 🚀 專案核心亮點 (Core Highlights)
-
-- **混合偵測引擎 (Hybrid Engine) [v2.2]**: 
-  - **L1 快速過濾**: 利用 Regex 規則引擎秒級攔截已知詐騙模式（如：加 LINE、投資飆股、中獎通知）。
-  - **L2 深度分析**: 透過 BERT 多國語言模型進行語意辨識，挖掘隱藏的誘騙意圖與情緒操縱。
-- **上下文感知 (Context Awareness) [v2.1]**: 自動採集來源網域 (URL) 與觸發時間戳記，提供更精準的風險評估背景。
-- **工業級健壯性**: 內建 **81 項自動化單元測試**，確保核心邏輯、資安防護與數據模型 100% 穩定運作。
+> 本專案為資安專題開發之「混合式 AI 網路安全防護系統」，旨在透過微服務架構，提供即時、高效且具備多國語言分析能力的惡意內容與釣魚連結攔截服務。
 
 ---
 
-## 🏗️ 系統架構 (Architecture)
+## 🌟 專案簡介 (Project Overview)
 
-1. **API Gateway (Port 8000)**: 入口網關，負責流量監控、SSRF 防護、以及將請求分流至不同微服務。
-2. **NLP Service (Port 8001)**: AI 運算單元，執行 BERT 模型推論。
-3. **Link Scanner (Port 8002) [New]**: 連結掃描引擎，整合 Google Safe Browsing 與啟發式檢測。
-4. **Chrome Extension (MV3)**: 前端偵測插件，改採 **Service Worker (background.js)** 架構以符合現代瀏覽器安全規範。
-5. **SQLite Database**: 非同步紀錄偵測日誌。
+**Sentinel-Core** 是一套專為防範社交工程、釣魚網站與惡意連結所設計的防護引擎。我們揚棄了傳統單一的防護模式，採用**「規則引擎 (Rule-based) + AI 語意分析 (NLP) + 網址掃描 (URL Scan)」**的三重混合防護架構。
+
+透過整合客戶端（瀏覽器擴充功能）與後端微服務 API 網關，系統能即時擷取網頁內容並進行非同步的風險評估，最終將 0~100 的信任分數 (Trust Score) 反饋給使用者，達成零延遲的無縫防護。
 
 ---
 
-## 🔒 資安防禦機制 (Security Hardening)
+## 🚀 核心功能與亮點 (Key Features)
 
-- **SSRF 阻斷**: 嚴格禁止對私有 IP (如 localhost, 127.0.0.1, 192.168.x.x) 的請求，防止攻擊者探測內部網路。
-- **XSS 跨站腳本防護**: 透過 `escapeHTML` 轉義機制，防止惡意選取內容或 API 回傳值造成代碼注入。
-- **日誌注入防護 (Log Injection)**: 對 URL 與時間戳記進行嚴格字元過濾，確保系統紀錄不被惡意竄改。
-- **流量限制 (Rate Limiting)**: 導入 `slowapi` 實作每 IP 每分鐘限制 10 次請求，防止服務遭濫用。
-- **單點故障隔離 (Fault Isolation)**：資料庫紀錄由 FastAPI BackgroundTasks 異步處理，即便資料庫發生 Locked 或連線異常，核心分析功能依然保持穩定，不影響使用者體驗。
-
----
-
-## 📜 版本紀錄 (Changelog)
-#### **v2.4 - 連結掃描整合與前端架構重構 (最新)**
-* **[微服務] 連結掃描引擎 (service_link_scanner)**：新增獨立服務，支援 Google Safe Browsing (GSB) 惡意網址對比與 Redirect 重新導向追蹤。
-* **[偵測] 啟發式網址分析**：支援 Punycode 偽裝偵測、可疑 TLD (.xyz/.tk) 識別。
-* **[前端] MV3 架構重構**：導入 `background.js` (Service Worker) 處理通訊，修復 Content Script 在非 HTTPS 頁面無法 fetch 本地 API 的限制。
-* **[UI] 堆疊式通知優化**：重構 Toast UI，支援 Flex 堆疊顯示，解決多重預警重疊問題 (UI-04)。
-* **[資安] 全域 SSRF 強化**：實作 `assert_public_http_url` 驗證器，嚴格禁止探測內部私有網路。
-
-#### **v2.3 - 數據持久化與背景任務**
-* **[資料庫] 異步日誌系統**：導入 `aiosqlite` 實作非同步掃描紀錄，確保偵測數據持久化。
-* **[穩定性] 背景任務處理**：使用 FastAPI `BackgroundTasks` 執行資料庫寫入，確保 I/O 延遲不影響 API 回應速度。
-* **[監控] 統計接口 (/stats)**：新增即時數據分析 API，支援回傳總掃描次數與平均信任得分。
-* **[測試] 健壯性提升**：補齊資料庫邊界測試，並實作全域 Mock 邏輯防止測試污染真實數據。
-* **[資安] Git 安全強化**：完善 `.gitignore` 規範，杜絕 `.db` 與 `.env` 敏感檔案上傳風險。
-
-#### **v2.2 - 混合偵測與自動化測試**
-* **[核心] 規則引擎整合**：實作 `RulesEngine`，支援 Regex 關鍵字與精確網域黑名單比對。
-* **[優化] 效能加強**：命中規則後回傳 `[快速攔截]`，節省 100% 的 AI 算力成本與延遲。
-* **[品質] 81 項自動化測試**：建立全量測試套件，達成 100% 測試通過率。
-* **[架構] 標準化導入**：優化 `sys.path` 邏輯，修復底線資料夾命名規範之模組導入問題。
-
-#### **v2.1 - 上下文感知與安全性強化**
-* **[功能] URL & Timestamp 採集**：插件自動同步當前頁面網址，並進行隱私參數剝離。
-* **[資安] SSRF 防禦**：於 Pydantic 模型實作私有網路 URL 阻斷。
-
-#### **v1.2 - 視覺動態與資安防禦**
-* **[核心] 前端三段式主題引擎**：實作 🟢 綠、🟡 橘、🔴 紅 三色動態 UI。
-* **[資安] XSS 防護**：新增 `escapeHTML` 函式，阻斷前端 HTML/Script 惡意注入。
-* **[資安] 數值校正**：導入 Score Clamping，解決 API 回傳異常值導致的 UI 溢出。
-* **[優化] 錯誤處理**：整合 429 限流與 503 斷線狀態之語意化 UI 標題。
-
-#### **v1.1 - 微服務架構重構**
-* **[架構] 拆分微服務**：解耦為 `API Gateway` 與 `NLP Service` 獨立運作。
-* **[資源] Lifespan 管理**：使用 FastAPI Lifespan 管理模型載入與非同步 Client。
-* **[流量] Rate Limiting**：導入 `slowapi` 實作每分鐘 10 次請求限制。
-* **[日誌] Logging 導入**：全面取代 print，具備時間戳記與錯誤層級分類。
-
-#### **v1.0 - 基礎原型建立**
-* **[AI] BERT 整合**：導入 `transformers` 進行基礎語意分析。
-* **[插件] Chrome Extension**：實作文字選取監聽與基礎通知彈窗。
+* **🧠 混合式防護引擎 (Hybrid Detection)**
+  * **L1 規則引擎：** 針對已知高風險特徵進行毫秒級快速攔截。
+  * **L2 AI 語意分析：** 採用 Hugging Face BERT 多語系模型，搭配自研「權重映射演算法」，將文字情緒與語意特徵轉化為資安信任分數。
+  * **L3 連結掃描器：** 針對 URL 進行深度解析與風險特徵比對。
+* **🛡️ 企業級安全防護 (Security Common)**
+  * **API Key 存取控制：** 嚴格限制內部微服務的呼叫權限，防止算力資源遭惡意濫用。
+  * **JWT 認證機制：** 保護後台統計與敏感數據 API。
+  * **SSRF 全域防護：** 實作嚴謹的網域解析與私有 IP 阻斷機制，防範伺服器端請求偽造攻擊。
+  * **API 限流 (Rate Limiting)：** 整合 `slowapi` 阻擋 DDoS 與惡意爬蟲。
+* **⚡ 高併發效能優化 (Performance)**
+  * 採用 **FastAPI** 搭配非同步 (Async) 微服務呼叫。
+  * 資料庫啟用 **SQLite WAL (Write-Ahead Logging) 模式**，並針對統計欄位建立索引 (Indexing)，徹底解決高併發背景寫入時的 Database Locked 問題。
 
 ---
 
+## 🛠️ 技術架構 (Tech Stack)
 
-### 🛠️ 安裝與啟動步驟 (Sentinel-Core v2.4)
-
-本專案採用微服務架構，啟動前請確保已完成環境依賴安裝，並依序啟動後端服務。
+* **後端核心：** Python 3, FastAPI, Uvicorn, HTTPX
+* **AI 與模型：** Hugging Face `transformers`, PyTorch, `bert-base-multilingual`
+* **資料庫：** SQLite, `aiosqlite` (非同步操作)
+* **安全套件：** `python-jose` (JWT), `passlib`, `slowapi`
+* **前端與客戶端：** 原生 JavaScript (Browser Extension)
+* **CI/CD：** GitHub Actions (自動化代碼檢查)
 
 ---
 
-#### 1. 基礎環境準備
-請確保您的開發環境已安裝 **Python 3.9+**。在專案根目錄執行以下指令安裝所有必要套件：
+## 📂 系統目錄結構 (Project Structure)
 
-```powershell
+```text
+Sentinel-Core/
+├── api_gateway/              # API 網關 (系統中樞神經)
+│   ├── main.py               # 網關路由與安全攔截
+│   ├── database.py           # 非同步資料庫連線池與日誌寫入
+│   └── rules_engine.py       # L1 規則引擎
+├── service_nlp/              # AI 語意分析微服務
+│   ├── detectors/
+│   │   └── bert_engine.py    # BERT 模型載入與權重轉換邏輯
+│   └── main.py               # NLP 服務 API
+├── service_link_scanner/     # URL 連結掃描微服務
+│   └── url_scan/             # 網址解析與特徵擷取模組
+├── common/                   # 跨微服務通用模組
+│   ├── models.py             # Pydantic 資料驗證模型
+│   ├── validators.py         # 網址格式與安全驗證
+│   └── security.py           # JWT, API Key 與 SSRF 防護邏輯
+├── browser_ext/              # 瀏覽器擴充功能客戶端
+│   ├── background.js         # 背景監聽腳本
+│   └── content.js            # 網頁 DOM 解析腳本
+└── tests/                    # 單元測試與整合測試
+
+```
+
+---
+
+## ⚙️ 快速啟動 (Getting Started)
+
+### 1. 環境準備
+
+請確保您的系統已安裝 Python 3.10+，並建議使用虛擬環境 (Virtual Environment)。
+
+```bash
+# 建立並啟動虛擬環境
+python -m venv venv
+source venv/bin/activate  # Windows 請使用 venv\Scripts\activate
+
+# 安裝系統相依套件
 pip install -r requirements.txt
+
 ```
 
-> **備註**：由於 BERT 模型較大，初次啟動 `service_nlp` 時系統會自動下載預訓練權重（約 600MB），請保持網路暢通。
+### 2. 環境變數設定
+
+複製 `.env.example` 並重新命名為 `.env`，根據需求配置以下金鑰：
+
+```ini
+GATEWAY_API_KEY=your-api-key-here
+JWT_SECRET=your-jwt-secret-key
+GATEWAY_RATE_LIMIT=30/minute
+
+```
+
+### 3. 啟動微服務
+
+系統包含三個主要服務，建議開啟三個終端機分別啟動（或使用我們提供的 `start-dev.ps1` 腳本）：
+
+```bash
+# 啟動 NLP 微服務 (Port: 8001)
+uvicorn service_nlp.main:app --port 8001
+
+# 啟動 Link Scanner 微服務 (Port: 8002)
+uvicorn service_link_scanner.main:app --port 8002
+
+# 啟動 API Gateway (Port: 8000)
+uvicorn api_gateway.main:app --port 8000 --reload
+
+```
 
 ---
 
-#### 2. 啟動服務 (需開啟兩個獨立終端機)
+## 📚 API 使用範例 (API Endpoints)
 
-#### 🚀 第一步：啟動 NLP 偵測服務 (AI 運算核心)
-這是系統的「大腦」，負責深度的語意分析。
-```powershell
-# 進入資料夾並執行
-cd service_nlp
-python main.py
-```
-* **檢查點**：終端機出現 `INFO: [NLP] 模型就緒` 即代表成功。
-* **預設位址**：`http://127.0.0.1:8001`
+API 網關提供 Swagger UI 互動式文件，服務啟動後可至：`http://127.0.0.1:8000/docs` 查看。
 
-#### 🛡️ 第二步：啟動 API 網關 (流量與規則控管)
-這是系統的「門神」，負責攔截已知詐騙與流量限制。
-```powershell
-# 進入另一個終端機，回到根目錄後執行
-cd api_gateway
-python main.py
-```
-* **檢查點**：出現 `Uvicorn running on http://127.0.0.1:8000`。
-* **預設位址**：`http://127.0.0.1:8000`
+### 1. 內容分析 (需 API Key)
 
-#### 🚀 第三步：啟動連結掃描服務 (惡意網址偵測)
-```powershell
-cd service_link_scanner
-python main.py
-```
-檢查點：終端機顯示啟發式偵測器已就緒。
-預設位址：`http://127.0.0.1:8002`
+* **Endpoint:** `POST /analyze`
+* **Headers:** `X-API-Key: <your_api_key>`
 
-> **備註**：首次啟動 `api_gateway` 時，系統會自動在根目錄建立 `sentinel_logs.db` 檔案。該檔案已列入 `.gitignore` 以確保數據隱私。
----
-
-#### 3. 執行自動化測試 (環境驗證)
-為確保您的 `sys.path` 導入與各項防禦邏輯（SSRF, Regex）在您的機器上運作正常，請在**根目錄**執行：
-
-```powershell
-python -m pytest tests/ -v
-```
-* **合格指標**：應看到 **81 PASSED** 的綠色結果。
-
----
-
-#### 4. 瀏覽器擴充功能掛載 (Chrome Extension)
-
-1.  開啟 Chrome 瀏覽器，進入 `chrome://extensions/`。
-2.  開啟右上角的 **「開發者模式」**。
-3.  點擊左上角 **「載入解壓縮擴充功能」**。
-4.  選擇專案目錄中的 `browser_ext` 資料夾完成掛載。
-
----
-
-#### 🧪 快速功能測試案例
-
-| 測試類型 | 選取文字內容 | 預期結果 (UI) | 攔截層級 |
-| :--- | :--- | :--- | :--- |
-| **已知詐騙** | "趕快加我 LINE 領取飆股資訊！" | 🔴 紅色通知：顯示 `[快速攔截]` | Rules Engine (L1) |
-| **安全內容** | "今天的天氣真好，適合去圖書館。" | 🟢 綠色通知：顯示 `Safe` 與評分 | BERT NLP (L2) |
-| **格式錯誤** | (選取超過 5000 字的長文) | ⚪ 灰色通知：顯示 `422 格式錯誤` | Pydantic Model |
-| **連線失敗** | (關閉 8000 埠後執行) | ⚪ 灰色通知：顯示 `連線失敗` | Extension Logic |
-| **惡意連結** | `http://apple-login.xyz` | 🔴 顯示 `[惡意網域]` | Link Scanner (L1.5) |
-| **重新導向** | (多層跳轉連結) | ⚠️ 顯示 `可疑重新導向` | Link Scanner (L1.5) |
-
----
-
-## 📡 API 規格
-
-### 1. 內容分析接口
-- **Endpoint**: `POST /analyze`
-- **功能**: 執行規則攔截與 AI 語意辨識。
-- **Rate Limit**: 30 請求/分鐘 (v2.4 調整)。
-
-### 2. 統計數據接口
-- **Endpoint**: `GET /stats`
-- **功能**: 獲取系統累計偵測數據。
-- **Response**:
 ```json
 {
-  "total": 42,
-  "avg_score": 75.5
+  "content": "恭喜您獲得中獎資格，請點擊連結領取...",
+  "url": "[http://suspicious-link.com](http://suspicious-link.com)",
+  "timestamp": "2026-06-24T12:00:00Z"
 }
+
 ```
-### 3. 連結分析接口
-- **Endpoint**: `POST /analyze/links`
-- **功能**: 批次掃描頁面連結安全性。
-- **Rate Limit**: 30 請求/分鐘。
+
+### 2. 系統統計 (需 JWT 認證)
+
+* **Endpoint:** `GET /stats`
+* **Headers:** `Authorization: Bearer <your_jwt_token>`
+* **Response:** 回傳總掃描次數與平均信任分數。
+
 ---
